@@ -48,6 +48,12 @@ uint32_t net_thread_start(const asr_text_port_t *text);
 void net_thread_acquire_input(void);
 
 /**
+ * @brief Give the input back without a window (after net_thread_acquire_input() by a thread
+ *        that borrowed the NPU, asr_engine_npu_acquire()).
+ */
+void net_thread_release_input(void);
+
+/**
  * @brief Hand the thread the window just written into the input tensor.
  * @pre net_thread_acquire_input() was called before the window was written.
  */

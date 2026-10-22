@@ -187,6 +187,12 @@ uint32_t net_thread_start(const asr_text_port_t *text)
     return (uint32_t)tx_thread_resume(&net_thread);
 }
 
+void net_thread_release_input(void)
+{
+    /* Ceiling 1: a stray extra release cannot let two windows into the input at once. */
+    (void)tx_semaphore_ceiling_put(&input_semaphore, 1U);
+}
+
 void net_thread_acquire_input(void)
 {
     unsigned long waited_s = 0U;

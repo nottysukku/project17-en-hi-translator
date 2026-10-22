@@ -82,3 +82,15 @@ uint32_t asr_engine_start(const asr_audio_port_t *audio, const asr_text_port_t *
 
     return mel_thread_start(audio, norm_thread_frames_ready);
 }
+
+void asr_engine_npu_acquire(void)
+{
+    /* The input is held from "window written" to "inference done": holding it means the NPU is
+       idle and no window can be written into the memories other networks use. */
+    net_thread_acquire_input();
+}
+
+void asr_engine_npu_release(void)
+{
+    net_thread_release_input();
+}

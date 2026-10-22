@@ -125,6 +125,19 @@ uint32_t asr_engine_start(const asr_audio_port_t *audio, const asr_text_port_t *
  */
 void asr_engine_audio_chunk_ready(void);
 
+/**
+ * @brief Take the NPU for another network (for example the translator's voice).
+ * @details Waits until the recognizer has finished the window in progress, then keeps it from
+ *          writing or running another one until asr_engine_npu_release(): the recognizer's input
+ *          tensor and activations share the NPU memories with other networks.
+ * @note Pause the audio port first, so that windows do not pile up meanwhile. Thread context
+ *       only; not from the recognizer's own threads.
+ */
+void asr_engine_npu_acquire(void);
+
+/** @brief Give the NPU back to the recognizer after asr_engine_npu_acquire(). */
+void asr_engine_npu_release(void);
+
 #ifdef __cplusplus
 }
 #endif
