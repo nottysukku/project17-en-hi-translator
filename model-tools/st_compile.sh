@@ -7,7 +7,7 @@
 #          functions are then vocoder_*.bin, stai_vocoder_*() and so on
 # ST_ROUNDTRIP: folder with neural_art.json and stm32n6.mpool (default below, the owner's PC).
 set -e
-M=$(cygpath -w "$(realpath "$1")"); W=$2
+M=$(cygpath -w "$(realpath "$1")"); W=$(realpath -m "$2")
 RT=${ST_ROUNDTRIP:-/c/Users/choprasu/Downloads/N6_AutoSpeech/Reverse_engineering2/Reverse_Engineering/cynipsnet_re/roundtrip}
 POOL=${3:-$RT/stm32n6.mpool}
 NAME=${4:-network}

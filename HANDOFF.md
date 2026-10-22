@@ -1,6 +1,8 @@
 # Handoff: state of Project 17 and what to do next
 
-Written 2026-10-22 by the Claude Code session that built this, for the agent continuing it. Read this whole file before changing anything.
+First written 2026-10-22 by the Claude Code session that built the models; updated the same day by the
+cloud session that did tasks 1-4 of the old list (branch `claude/peaceful-mccarthy-gdlqoe`). Read this whole
+file before changing anything.
 
 ## 1. Goal (the owner's words, condensed)
 
@@ -29,116 +31,185 @@ Written 2026-10-22 by the Claude Code session that built this, for the agent con
   - Music line: WBA PB0 → N6 D2 = PD0.
 - Full table: `firmware-n6/src/application/translator/README.md`.
 
-## 3. What exists
+## 3. Status in one paragraph
 
-### firmware-n6 (branch history included)
+Everything is written and tested on the PC; nothing new has run on the board yet. The firmware's translator
+mode now cuts the recognized English into sentences, translates each on the board, shows the Hindi, and speaks
+it, with music cancelling translation and speech at once. All models fit the 128 MB NOR (map in
+`firmware-n6/src/application/translator/models.json`). What is left for the owner: compile the two voice
+networks with ST Edge AI, build, flash, and send back the logs (section 6). The next agent then fixes what the
+board shows and measures speed (section 7).
 
-- **ASR:** CynipsNet CTC on the NPU, fine-tuned for Indian English, with punctuation and sentence case. The model is in `src/asr_engine/models/cynipsnet_punct1` (weights flashed at 0x71500000).
-- **Translator mode** (`src/application/translator/`): built and flashed once; not yet tested with the wiring.
-  - `xl_audio_out.c`: SAI2_B I2S at 48 kHz, with a −3 dB level ceiling sized for the 0.5 W speaker.
-  - `xl_router.c`: SEL, amp mute, and the music-line debounce (on after 100 ms, off after 1.5 s).
-  - `xl_display.c`: GUI with status bar, English panel, and a Hindi placeholder. Buttons are AUTO / TRANSLATE / MUSIC / TONE.
-  - **"Sleep":** recognition is paused (`audio_port_set_paused`), audio out stops, the LCD turns off and the CPU waits in WFI.
-- **`src/translate/it2.c`:** IndicTrans2 English→Hindi engine in portable C (Helium `q4_group_dot` under `__ARM_FEATURE_MVE`). Tested on the PC only; not yet in any CMake target.
-  - Blob made by `model-tools/it2_pack.py`: 18 encoder + 18 decoder layers, 4-bit weights in groups of 64 with fp16 scales, and a Hindi-only output vocabulary of 41052 tokens (`model-tools/assets/hindi_vocab.json`). It is 93.0 MB.
-  - Activations are int8 with one scale per 64-group. Per-row scales cost 6 chrF.
-  - **Measured on 120 IITB test sentences:** chrF++ 47.7, against 48.1 for the float model. On the PC it takes 205 ms to encode and 290 ms to decode per sentence. Board speed is unknown: the decoder reads about 44 MB of weights per token from NOR.
-  - **Tokeniser:** matches Python on 133 of 136 sentences. Only abbreviations such as "Dr." differ; adding a non-breaking-prefix list would fix that.
-  - **PC test:**
-    - Build: `python -m ziglang cc -O2 -I. it2.c test/it2_host.c -lm`.
-    - Run: `model-tools/it2_host_check.py`.
-- **`src/application/translator/xl_hindi_text.c`:** Devanagari rendering from `model-tools/assets/hi_font_40.bin`. Not yet called by the GUI.
-  - The font has 6722 syllables pre-shaped with HarfBuzz from Noto Sans Devanagari (OFL), 40 px, weight 500, 5.2 MB.
-  - Syllable splitting is identical to Python on 20000 sentences, and wrapping works. PC test: `test/hindi_text_host.c`.
-  - `mw_lcd_draw_alpha4()` was added to `src/middleware/lcd`.
+## 4. What exists
+
+### firmware-n6
+
+- **ASR:** CynipsNet CTC on the NPU, Indian English, punctuation and sentence case
+  (`src/asr_engine/models/cynipsnet_punct1`, weights at 0x71500000). It rarely writes `.` (recall 3%) or `?`,
+  so sentences are mostly cut at pauses.
+  - `asr_engine_npu_acquire()/release()` lets the translator borrow the NPU: it holds the recognizer's input
+    semaphore, so no window runs or is written while the voice networks use the shared NPU memories.
+- **Translator mode** (`src/application/translator/`, `-DAPP_TRANSLATOR_MODE=ON`), see its README:
+  - `xl_sentence.c`: sentence cutting (end mark not after Mr./Dr./...; 1.2 s pause; 200 characters).
+  - `xl_translator.c`: the translator thread (priority 13, lowest). Per sentence: sentence case, `it2_translate`,
+    publish the Hindi, then (if the N6 has the speaker) speak with recognition paused and the NPU borrowed.
+    `xl_translator_cancel()` stops it; `xl_translator_listen()` combines the pause reasons (music, speech).
+  - `xl_speech.c`: voice front end (CPU) → flow (NPU, 512-frame windows, 32 frames of context) → vocoder (NPU,
+    64 frames + 15 each side) → `xl_resample.c` (16 → 48 kHz, 96 taps) → speaker ring; audio is queued once two
+    vocoder steps are ahead. Logs the time of each stage ("Speech: ...").
+  - `xl_display.c`: two lines of English, the Hindi below (`xl_hindi_text.c`), "Translating..." / "Speaking
+    Hindi..." in the status bar. On music: flush and stop the speaker, cancel, drop the half-heard sentence.
+  - `models.json` → `tools/models_layout.py` → `xl_models.h` (addresses). The linker's NOR_APP now ends at
+    0x70500000 (4 MB; the app is 1.24 MB without the voice networks' generated code).
+  - Not yet tested with the wiring, and the speed is unknown.
+- **`src/translate/it2.c`** (IndicTrans2): now in the build (`-O2` always). New: tokeniser splits trimmed source
+  pieces like SentencePiece (unused here, see 5), 8-bit scale codes (tensor kind 2, blob version 3), a cancel
+  hook, and a fix: `scratch_of()` ignored the 32-byte rounding of the decoder table, which would have crashed
+  on the 32-bit board with 18 decoder layers.
+- **`src/tts/tts_front.c`**: MMS-TTS front end (tokenizer, text encoder with relative attention, stochastic
+  duration predictor with spline flows, durations, prior noise from a counter-based generator). Int8 text
+  encoder with int8 activations (as it2), float16 duration predictor.
+- **`src/tts/xl_voice_net.c`**: the flow and vocoder through ST's generated API (`stai_flow_*`,
+  `stai_vocoder_*`). Static assertions check shapes and float32 I/O. CMake builds them in when the generated
+  files are in `src/tts/networks/flow` and `src/tts/networks/vocoder`; otherwise text only.
+- **`xl_hindi_text.c`** reads font version 2 (run-length coded, decoded one row at a time).
 
 ### firmware-wba
 
-- ST `BLE_Audio_TMAP_Peripheral` (STM32CubeWBA 4ccfd152), ported to the Nucleo. All changes are under `BOARD_NUCLEO_MAX98357A`.
-- Builds with CMake against an STM32CubeWBA checkout with submodules. It has **not been flashed or tested**.
-- Details are in its README:
-  - software volume plus a −3 dB ceiling;
-  - PB0 music line (audible stream, held 1 s);
-  - advertises as `N6_Music_xxxx`;
-  - media receiver roles only.
+Unchanged: ST `BLE_Audio_TMAP_Peripheral` ported to the Nucleo, built with CMake, **not yet flashed or tested**.
+Details in its README.
 
-### Text-to-speech (model-tools; nothing in the firmware yet)
+### model-tools
 
-- **Model:** `facebook/mms-tts-hin` (VITS, character input, 16 kHz, CC-BY-NC, which is fine for an internal demo).
-- **Components:**
-  - text encoder: 6.3 M parameters;
-  - stochastic duration predictor (SDP): 1.3 M;
-  - flow: 7.1 M;
-  - HiFi-GAN: 14.3 M.
-  - The posterior encoder is not needed.
-- **Plan:**
-  - text encoder + SDP + length regulation + noise on the CPU in C (not written yet);
-  - flow and HiFi-GAN on the NPU (graphs done, see below);
-  - resample 16 → 48 kHz for `xl_audio_out`;
-  - pause ASR while speaking.
-- **NPU findings (ST Edge AI 4.0, measured):**
-  - Vertical kernels are limited to 3.
-  - Conv rows wider than about 768 fall back to software.
-  - ConvTranspose becomes a software Resize.
-  - A dilated kernel spanning more than about 11 runs in software.
-  - Div and some Adds stay float.
-- **`tiled_vocoder.py`:** HiFi-GAN rewritten as an exact static graph (max error 3e-7 against the original). It has:
-  - time on the width axis;
-  - a 3-tap polyphase conv instead of ConvTranspose;
-  - rows of at most 640 with halos, re-tiled per stage;
-  - valid convolutions;
-  - big dilated kernels split into 3-tap groups;
-  - 1/3 averaging folded into the weights.
-  - **Compiled:** everything on the NPU except the input quantize, output dequantize and tanh. That is 24.6 GMAC per 64-frame chunk (1.024 s of audio), 16 MB of int8 weights, 12.7 MB of activations in hyperRAM. The board needs 15 latent frames of context on each side.
-- **`npu_flow.py`:** the flow rewritten exactly (1.4e-6), with flips folded into the weights and a 512-frame static length plus mask. It has **not been compiled yet**.
-- **int8 quality is not verified yet.** `tts_eval.py` runs float against int8 (ONNX Runtime) and scores with Whisper-small; it was interrupted. The vocoder's waveform SNR was about 15 dB. If the voice sounds bad, try better calibration (percentile/entropy, more data) before anything else.
+- Translation: `it2_pack.py` (`--scale8`, `--src-keep`), `vocab_trim.py --max N`, `it2_trim_eval.py` (packs and
+  scores variants in parallel), `it2_host_check.py` (`--save`, `--compare`), `assets/hindi_vocab_31k.json`.
+- Font: `hi_font_rle.py` (v1 → v2 converter); `hi_font_build.py` writes v2; `assets/hi_font_40.bin` is v2.
+- Voice: `tts_front_ref.py` (Python mirror of the C front end), `tts_front_pack.py`, `tts_front_check.py`,
+  `tts_front_eval.py`; `tts_eval.py` now also reports a log-mel distance; `resample_design.py`.
+- ST Edge AI: `mpool_edit.py` (pool file for a voice network from `models.json`); `st_compile.sh` takes the
+  network name.
 
-## 4. What the cloud agent can and cannot do
+## 5. Measured results
 
-- **Can:** write and refactor C and Python, build and run PC tests (gcc/clang instead of zig on Linux), cross-compile with `arm-none-eabi-gcc` if it installs, and download Hugging Face models if the network allows.
-  - Use the ungated mirror `naklitechie/indictrans2-en-indic-dist-200M`; its checksums match the gated original.
-  - `model-tools/fetch_models.py` downloads it.
-- **Cannot:** flash or test hardware, run ST Edge AI (proprietary, Windows install at `C:\ST\STEdgeAI\4.0`), or run Windows paths. `st_compile.sh` and `flash.py` contain the owner's local paths.
-- **Hand the owner exact commands** for anything that needs the ST tools. The NPU graphs must be compiled on their PC:
-  1. `model-tools/tts_export.py ... 64 t` exports and quantizes the tiled vocoder.
-  2. `st_compile.sh` compiles it. Give each network its own `stedgeai --name` and an mpool whose octoFlash offset matches its final flash address.
-- **firmware-n6 builds** against the ST Edge AI 4.0 runtime (`-DSTEDGEAI_ROOT=C:/ST/STEdgeAI/4.0/Middlewares/ST/AI`), because `cynipsnet_punct1` was generated by 4.0. The vendored runtime under `src/middleware/stedgeai` may not match.
-- **Large generated files are not in git:**
-  - the 93 MB MT blob: regenerate with `fetch_models.py` + `it2_pack.py --dec-layers 0,1,...,17`;
-  - the ONNX graphs;
-  - the IITB data (`cfilt/iitb-english-hindi`, ungated).
+**Translation** (C engine, 400 IITB test sentences, chrF++; "same" = sentences translated as the full model):
 
-## 5. Next tasks, in order
+| Variant | Size | chrF++ |
+|---|---|---|
+| Full: 18 decoder layers, 41k Hindi tokens, fp16 scales | 93.0 MB | 49.7 |
+| 31k Hindi tokens (99.83% coverage; 99% same) | 90.1 MB | 49.6 |
+| 31k + 8-bit scales | 87.5 MB | 49.6 |
+| 31k, decoder layer 1 / 5 / 9 / 13 / 16 dropped | 87.8 MB | 49.5 / 49.6 / 49.5 / 49.5 / 49.2 |
+| **31k + 8-bit scales + layer 5 dropped (used)** | **85.3 MB** | **49.5** |
+| Source vocabulary 24k / 20k / 16k / 12k rows (not used) | 90.7-87.5 MB | 49.3 / 48.9 / 48.5 / 47.9 |
 
-1. **NOR flash budget (128 MB).** It currently over-runs:
-   - FSBL 1 + app ≤4 + ASR 7 (fixed at 0x71500000) + MT 93 + vocoder 16 + flow ~7 + TTS CPU weights ~4 + font 5.2 ≈ 137 MB.
-   - Free regions are 0x70500000–0x71500000 (16 MB) and 0x71C00000–0x78000000 (100 MB).
-   - Options:
-     - trim the MT source vocabulary to the most frequent ~20k BPE pieces (saves about 5 MB);
-     - trim the target vocabulary to 31k tokens (99.85% coverage, about 2.5 MB);
-     - drop 1–2 decoder layers, but measure chrF first;
-     - use a 36 px font.
-   - Write `firmware-n6/src/application/translator/models.json` with each blob and its address; `flash.py --models` reads it.
-2. **TTS quality check** with `tts_eval.py`, then fix the quantization if needed.
-3. **TTS front end in C.** Verify each piece against PyTorch (`transformers` `VitsModel`) on the PC:
-   - MMS tokenizer: characters with `add_blank`, vocabulary in the model's `vocab.json`;
-   - text encoder with relative attention (window 4);
-   - SDP reverse with rational-quadratic spline flows;
-   - durations: `ceil(exp(logw))`;
-   - prior noise (scale 0.667, duration noise 0.8).
-4. **Firmware integration** in translator mode:
-   - Link `it2.c` and `xl_hindi_text.c`.
-   - Add a translator thread with lower priority than ASR. Use the PSRAM workspace (`it2_workspace_size`, about 20 MB with 18 decoder layers; consider fp16 KV caches).
-   - Detect the end of a sentence from the ASR text (end mark, or a pause) and translate each sentence.
-   - Show the Hindi panel.
-   - Run TTS with ASR paused while speaking.
-   - Stop speech immediately when music starts (router).
-   - Add the two extra NPU networks.
-5. **Speed on the board:** measure, then stream weights with DMA if NOR reads by the CPU are slow. Encoder GEMMs already reuse each weight row for all tokens.
-6. **Optional:** fine-tune or distil a shallower decoder for speed (Colab). With 10 of 18 layers and no fine-tuning, chrF drops to 43.1 at 4-bit.
-7. **True Stop mode** on the N6. Today the "sleep" is Sleep mode: WFI, NPU idle, LCD off.
+On the old 120-sentence set the used model scores 47.9, the same as the full model on this PC (the owner's PC
+measured 47.7 for the full model). The C tokeniser matches SentencePiece on 133 of 136 test sentences; the 3
+differences are abbreviations ("Dr.") and a final period.
 
-## 6. Conventions
+**Voice:**
+- Front end precision (Whisper-small CER, 12 sentences, float back end): float 16.5%, int8 17.9%, 4-bit 22.2%.
+- C front end vs Python: identical structure (with float activations: within 2.7e-5, all 854 durations equal).
+- Int8 flow + vocoder in ONNX Runtime vs float (`tts_eval.py`): CER 19.4% vs 17.9%; log-mel distance 0.17 dB,
+  where two float renderings with different noise differ by 0.99 dB. The calibration stays as it is.
+- Speech pipeline with stand-in networks: sample-exact across windows and steps; cancel queues nothing.
+
+**Flash map** (bytes used / slot): voice front end 7.74 / 7.80 MB at 0x70500000; 1.1 MB free (app growth);
+flow ~7.3 / 7.86 MB at 0x70D80000; ASR 7.34 MB at 0x71500000; translation 85.30 / 85.33 MB at 0x71C10000;
+font 2.80 / 2.82 MB at 0x76D70000; vocoder ~15.9 / 16.65 MB at 0x77020000 (to the end).
+**PSRAM:** app 5 MB; ASR 1 MB at 0x90500000; from 0x90610000, 27 MB used in turn by the translation workspace
+(17.7 MB) or the voice (9.4 MB of buffers, then the networks' activations from 0x90F10000).
+
+## 6. What the owner runs (Windows, Git Bash, from the repository folder)
+
+The cloud session cannot run ST Edge AI or flash. Commands, in order:
+
+```bash
+# 0. The branch, and ThreadX (its submodule entry was missing before)
+git fetch origin && git checkout claude/peaceful-mccarthy-gdlqoe && git submodule update --init
+
+# 1. Models (into model-tools/downloads, about 3.5 GB; skip what you already have there)
+python model-tools/fetch_models.py
+
+# 2. Blobs for the CPU
+python model-tools/it2_pack.py model-tools/downloads/naklitechie__indictrans2-en-indic-dist-200M \
+    model-tools/assets/hindi_vocab_31k.json model-tools/out/it2.bin \
+    --dec-layers 0,1,2,3,4,6,7,8,9,10,11,12,13,14,15,16,17 --scale8
+python model-tools/tts_front_pack.py model-tools/downloads/facebook__mms-tts-hin model-tools/out/tts/tts_front.bin
+sha256sum model-tools/out/it2.bin model-tools/out/tts/tts_front.bin
+#   expected b17189e5...4b888 (85302656 bytes) and 59066596...16278 (7736640 bytes)
+
+# 3. The two voice graphs (int8 ONNX)
+python model-tools/tts_export.py model-tools/downloads/facebook__mms-tts-hin model-tools/out/tts 64 t
+python model-tools/tts_eval.py model-tools/downloads/facebook__mms-tts-hin model-tools/out/tts none --calib-only
+
+# 4. Their memory-pool files, from the pool the recognizer was compiled with
+RT=/c/Users/choprasu/Downloads/N6_AutoSpeech/Reverse_engineering2/Reverse_Engineering/cynipsnet_re/roundtrip
+mkdir -p model-tools/out/st
+python model-tools/mpool_edit.py "$RT/stm32n6.mpool" vocoder model-tools/out/st/vocoder.mpool
+python model-tools/mpool_edit.py "$RT/stm32n6.mpool" flow model-tools/out/st/flow.mpool
+
+# 5. Compile both with ST Edge AI 4.0 (each prints its NPU/software split and sizes)
+sh model-tools/st_compile.sh model-tools/out/tts/vocoder_t64_int8.onnx model-tools/out/st/vocoder model-tools/out/st/vocoder.mpool vocoder
+sh model-tools/st_compile.sh model-tools/out/tts/flow_512_int8.onnx model-tools/out/st/flow model-tools/out/st/flow.mpool flow
+
+# 6. Their C code into the firmware
+mkdir -p firmware-n6/src/tts/networks/vocoder firmware-n6/src/tts/networks/flow
+cp model-tools/out/st/vocoder/st_out/*.[ch] firmware-n6/src/tts/networks/vocoder/
+cp model-tools/out/st/flow/st_out/*.[ch] firmware-n6/src/tts/networks/flow/
+python tools/models_layout.py          # must print no PROBLEM line
+
+# 7. Build (the FSBL as before if firmware-n6/fsbl/build is not there yet)
+cd firmware-n6
+cmake --preset default -G Ninja -B build_translator -DCMAKE_BUILD_TYPE=Release -DSTM32_C_OPTIMIZATION=-Os \
+    -DASR_MODEL_NETWORK=cynipsnet_punct1 -DSTEDGEAI_ROOT=C:/ST/STEdgeAI/4.0/Middlewares/ST/AI -DAPP_TRANSLATOR_MODE=ON
+cmake --build build_translator --target app
+cd ..
+
+# 8. Flash everything (BOOT1 = H, reset; the script waits), then BOOT1 = L and reset
+python tools/flash.py n6 --models
+```
+
+**Send back:**
+1. The output of steps 5 and 6 (especially lines with `octoFlash`, `hyperRAM`, `HW`/`SW`, and the `.bin`
+   names and sizes), and of step 7's configure line "Hindi voice: ..." and the last `NOR_APP` line.
+2. The serial log (ST-LINK virtual COM port, 115200 baud) from power-up through two or three spoken sentences:
+   lines starting with `Translator:`, `Speech:` and `NPU inference time`.
+3. What you see and hear: is the Hindi right, is the voice clear, does it stutter, does music cut it at once.
+
+If a step fails, send its last 30 lines; do not work around it.
+
+## 7. Next tasks, in order
+
+1. **Get the owner's results through:** fix compile or link errors from the generated code (the file and
+   function names `stai_flow_*` / `stai_vocoder_*` and the `.bin` names in `models.json` are assumptions about
+   `--name`); check the ST reports: everything on the NPU, the weights within their slots, activations within
+   `voice_npu`.
+2. **Speed on the board:** from the log. Translation reads ~41 MB of weights per output token from NOR; if
+   decoding is slow, stream weights with DMA or keep hot tensors in PSRAM. If the vocoder is slower than real
+   time, raise `XL_SPEECH_LEAD_RUNS` or synthesize the whole sentence before playing.
+3. **Moses non-breaking prefixes** in `it2.c`'s tokeniser ("Mr.", "Dr.", single letters): the last tokeniser
+   differences, and the recognizer's sentence case turns "MR." into "Mr.".
+4. **Numbers in speech:** the voice's alphabet has only the digits 0-4 and 8; spell numbers as Hindi words before
+   `tts_front_text_to_ids` if the translator outputs digits.
+5. **Optional:** distil a shallower decoder for speed (Colab). With 10 of 18 layers and no fine-tuning chrF drops
+   to 43.1.
+6. **True Stop mode** on the N6. Today the "sleep" is Sleep mode: WFI, NPU idle, LCD off.
+7. **WBA:** flash and test the music receiver.
+
+## 8. What a cloud agent can and cannot do
+
+- **Can:** write C and Python; build and run PC tests (gcc); cross-compile the firmware with `arm-none-eabi-gcc`
+  (`apt-get install gcc-arm-none-eabi libnewlib-arm-none-eabi`); download from Hugging Face (works); run the
+  PyTorch, ONNX Runtime and Whisper checks (a venv with torch CPU, transformers, onnxruntime, sentencepiece,
+  sacremoses, sacrebleu, scipy, soundfile). The full model downloads and ONNX exports take about 4 GB.
+- **Cannot:** flash, test hardware, or run ST Edge AI.
+- The vendored runtime under `src/middleware/stedgeai` is LL_ATON 1.1.3-262; `cynipsnet_punct1` needs -275, so
+  cloud builds use `-DASR_MODEL_NETWORK=cynipsnet_v1.0` to check compiling and linking.
+- PC tests: `firmware-n6/src/application/translator/README.md` (sentence, speech, Hindi text),
+  `model-tools/it2_host_check.py` (build `src/translate` with `gcc -O2 -I. it2.c test/it2_host.c -lm`),
+  `model-tools/tts_front_check.py` (build `src/tts` with `gcc -O2 -I. tts_front.c test/tts_front_host.c -lm`).
+
+## 9. Conventions
 
 - **Commits:** end messages with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Work on a branch, and do not push to `main` without the owner.
 - **Code style:** same as the existing files. Doxygen file and function headers, short plain comments, C99, no dynamic allocation in firmware.

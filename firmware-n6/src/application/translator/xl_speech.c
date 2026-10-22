@@ -49,13 +49,16 @@ static void log_none(const char *format, ...)
 #define XL_SPEECH_HOP 256U
 #define XL_SPEECH_UP  3U
 
+/** @brief 48 kHz samples of the longest sentence, with the resampler's tail. */
+#define XL_SPEECH_PCM (((XL_SPEECH_MAX_FRAMES * XL_SPEECH_HOP) + XL_RESAMPLE_TAPS) * XL_SPEECH_UP)
+
 typedef struct
 {
     tts_front_t front;
     uint16_t ids[TTS_MAX_IDS];
     xl_resample_t resampler;
     float *acoustic; /* [XL_SPEECH_MAX_FRAMES][192]: the flow's output, frame-major */
-    int16_t *pcm;    /* [XL_SPEECH_MAX_FRAMES * 256 * 3] at 48 kHz */
+    int16_t *pcm;    /* XL_SPEECH_PCM samples at 48 kHz */
     int ready;
 } speech_t;
 
@@ -70,7 +73,7 @@ size_t xl_speech_workspace_size(void)
 {
     return align32(tts_front_workspace_size()) +
            align32((size_t)XL_SPEECH_MAX_FRAMES * XL_VOICE_CHANNELS * sizeof(float)) +
-           align32((size_t)(XL_SPEECH_MAX_FRAMES * XL_SPEECH_HOP * XL_SPEECH_UP) * sizeof(int16_t));
+           align32((size_t)XL_SPEECH_PCM * sizeof(int16_t));
 }
 
 int xl_speech_init(const void *front_blob, void *workspace)
