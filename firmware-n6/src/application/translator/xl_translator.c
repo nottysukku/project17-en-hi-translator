@@ -84,12 +84,25 @@ static int speech_cancelled(void)
     return (job_epoch != cancel_epoch) || (xl_router_target() != XL_SOURCE_N6);
 }
 
-/** @brief The PSRAM work region holds the voice now: write back the translator's dirty lines so
- *         none can land on the voice networks' activations, and drop the NPU's stale lines. */
+/**
+ * @brief The PSRAM work region holds the voice now. The CPU's D-cache is written back, so no dirty
+ *        line of the translation workspace can land on the voice networks' activations; the NPU
+ *        cache drops its lines of the region (none are dirty: see leave_voice_phase()).
+ */
 static void enter_voice_phase(void)
 {
     SCB_CleanInvalidateDCache();
-    npu_cache_invalidate();
+    npu_cache_clean_invalidate_range(XL_PSRAM_WORK_ADDR, XL_PSRAM_WORK_ADDR + XL_PSRAM_WORK_SIZE);
+}
+
+/**
+ * @brief The translation gets the work region back. The NPU cache writes back and drops its lines
+ *        of the region now, while the data is still the voice's: otherwise the recognizer's NPU
+ *        traffic could evict them later, over the translation workspace.
+ */
+static void leave_voice_phase(void)
+{
+    npu_cache_clean_invalidate_range(XL_PSRAM_WORK_ADDR, XL_PSRAM_WORK_ADDR + XL_PSRAM_WORK_SIZE);
 }
 
 static int take_sentence(void)
@@ -161,6 +174,7 @@ static void open_models(void)
             LOG_WARNING("Translator: no Hindi voice (%d): text only", status);
         }
     }
+    leave_voice_phase();
     asr_engine_npu_release();
 }
 
@@ -212,6 +226,7 @@ static void translate_and_speak(void)
             LOG_ERROR("Translator: speech failed (%d)", status);
         }
     }
+    leave_voice_phase();
     asr_engine_npu_release();
     xl_translator_listen(XL_LISTEN_SPEECH, 0);
     activity = 0U;
