@@ -32,6 +32,9 @@
 #endif
 #include "led_thread.h"
 #include "logger.h"
+#ifdef APP_TRANSLATOR_MODE
+#include "xl_translator.h"
+#endif
 #include "main.h"
 #include "tx_api.h"
 #include "version.h"
@@ -88,6 +91,10 @@ static const app_module_t modules[] = {
   { "npu",        NULL,                   npu_start             },
   { "microphone", NULL,                   audio_port_start      },
   { "asr_engine",  asr_engine_create,       recognition_start     },
+#ifdef APP_TRANSLATOR_MODE
+  /* after asr_engine: it borrows the NPU runtime the recognizer starts */
+  { "translator", xl_translator_create,   xl_translator_start   },
+#endif
 };
 
 /** @brief Control block of the startup thread. */

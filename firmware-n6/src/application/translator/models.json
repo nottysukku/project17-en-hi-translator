@@ -1,0 +1,46 @@
+{
+  "about": [
+    "Memory map of the translator (STM32N6570-DK). tools/models_layout.py checks it and writes xl_models.h;",
+    "tools/flash.py n6 --models programs every flash entry that has a file. Paths are relative to the repository.",
+    "NPU networks (asr, vocoder, flow) have their flash and PSRAM addresses compiled in by ST Edge AI:",
+    "model-tools/mpool_edit.py writes their memory-pool files from this map. Sizes in bytes."
+  ],
+  "nor": {"start": "0x70000000", "size": "0x08000000"},
+  "psram": {"start": "0x90000000", "size": "0x02000000"},
+  "flash": [
+    {"name": "fsbl", "address": "0x70000000", "slot": "0x00100000",
+     "what": "First-stage boot loader (flash.py n6)"},
+    {"name": "app", "address": "0x70100000", "slot": "0x00400000",
+     "what": "Application, run in place (linker region NOR_APP)"},
+    {"name": "vocoder", "address": "0x70500000", "slot": "0x01000000", "npu": true,
+     "file": "model-tools/out/st/vocoder/st_out/vocoder_atonbuf.xSPI2.bin",
+     "what": "HiFi-GAN vocoder weights (NPU, stedgeai --name vocoder)"},
+    {"name": "asr", "address": "0x71500000", "slot": "0x00710000", "npu": true,
+     "file": "firmware-n6/src/asr_engine/models/cynipsnet_punct1/network_atonbuf.xSPI2.bin",
+     "what": "Speech recognition weights (NPU, cynipsnet_punct1; address fixed by its compile)"},
+    {"name": "flow", "address": "0x71C10000", "slot": "0x00780000", "npu": true,
+     "file": "model-tools/out/st/flow/st_out/flow_atonbuf.xSPI2.bin",
+     "what": "Voice flow weights (NPU, stedgeai --name flow)"},
+    {"name": "tts_front", "address": "0x72390000", "slot": "0x00770000", "macro": "TTS_FRONT",
+     "file": "model-tools/out/tts/tts_front.bin",
+     "what": "Voice front end weights for the CPU (tts_front_pack.py)"},
+    {"name": "font", "address": "0x72B00000", "slot": "0x002B0000", "macro": "FONT",
+     "file": "model-tools/assets/hi_font_40.bin",
+     "what": "Devanagari syllable font, 40 px, run-length coded (hi_font_rle.py)"},
+    {"name": "translation", "address": "0x72DB0000", "slot": "0x05250000", "macro": "TRANSLATION",
+     "file": "model-tools/out/it2.bin",
+     "what": "English-to-Hindi translation model (it2_pack.py)"}
+  ],
+  "psram_regions": [
+    {"name": "app", "address": "0x90000000", "size": "0x00500000",
+     "what": "Application: framebuffers and .psram_bss (linker region PSRAM)"},
+    {"name": "asr_npu", "address": "0x90500000", "size": "0x00110000",
+     "what": "Recognizer activations (fixed by its compile: 0x90500000-0x90606800)"},
+    {"name": "work", "address": "0x90610000", "size": "0x019F0000", "macro": "WORK",
+     "what": "Shared, in turn: the translation workspace, or the voice (the two regions below)"},
+    {"name": "voice_work", "address": "0x90610000", "size": "0x00900000", "macro": "VOICE_WORK",
+     "what": "Voice: front-end workspace, latents and 48 kHz audio of one sentence"},
+    {"name": "voice_npu", "address": "0x90F10000", "size": "0x010F0000", "macro": "VOICE_NPU",
+     "what": "Voice networks' activations (hyperRAM pool of the flow and vocoder compiles)"}
+  ]
+}

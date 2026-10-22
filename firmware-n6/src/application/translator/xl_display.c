@@ -10,6 +10,11 @@
  *             polled 5 times a second.
  *           The state follows the router's target source, so a switch in progress already counts.
  *
+ *           Translation: committed English goes through xl_sentence.c; each finished sentence goes
+ *           to the translator thread (xl_translator.c), whose Hindi is drawn with the syllable font
+ *           (xl_hindi_text.c). When music takes the speaker, translation and speech are cancelled
+ *           at once and the half-heard sentence is dropped.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -24,7 +29,6 @@
 #include <string.h>
 
 #include "asr_model_params.h"
-#include "audio_port.h"
 #include "logger.h"
 #include "mw_lcd.h"
 #include "stm32n6570_discovery.h"
@@ -33,7 +37,11 @@
 #include "stm32n6570dk.h"
 #include "text_case.h"
 #include "xl_audio_out.h"
+#include "xl_hindi_text.h"
+#include "xl_models.h"
 #include "xl_router.h"
+#include "xl_sentence.h"
+#include "xl_translator.h"
 
 /*******************************************************************************/
 /*                               PRIVATE DEFINES                               */
@@ -63,6 +71,9 @@
 /** @brief Recognized English kept for the screen, and the tentative tail. */
 #define XL_TEXT_CAPACITY      400U
 #define XL_TENTATIVE_CAPACITY 160U
+
+/** @brief English lines shown above the Hindi. */
+#define XL_ENGLISH_LINES 2U
 
 /** @brief Layout, in pixels (800 x 480 panel, 48 px font). */
 #define XL_MARGIN     12
@@ -148,6 +159,12 @@ static uint32_t last_press;
 
 static const char *note;
 static uint32_t note_until;
+
+/** @brief The latest Hindi translation, and whether the syllable font is flashed. */
+static char hindi[XL_TRANSLATOR_HINDI_CAPACITY];
+static uint32_t hindi_revision;
+static int font_ok;
+static uint32_t drawn_activity;
 
 static xl_mode_t drawn_mode;
 static int drawn_music;
@@ -348,6 +365,14 @@ static const char *status_text(void)
 
     if (xl_router_target() == XL_SOURCE_N6)
     {
+        if (xl_translator_activity() == 1U)
+        {
+            return "Translating...";
+        }
+        if (xl_translator_activity() == 2U)
+        {
+            return "Speaking Hindi...";
+        }
         return music ? "Translator (music waiting)" : "Speaker: Translator";
     }
     return music ? "Speaker: Bluetooth music" : "Music (nothing playing)";
@@ -360,7 +385,8 @@ static void draw_screen(uint32_t now)
     const int32_t line_height = (int32_t)mw_lcd_get_line_height(1U);
     const int32_t text_w = screen_w - (2 * XL_MARGIN);
     const int32_t english_y = XL_BAR_H + 8;
-    const int32_t hindi_y = english_y + (3 * line_height) + 16;
+    const int32_t hindi_y = english_y + ((int32_t)XL_ENGLISH_LINES * line_height) + 16;
+    const int32_t hindi_bottom = (int32_t)mw_lcd_get_height() - XL_MARGIN - XL_BUTTON_H - 8;
     uint32_t index;
 
     if (!laid_out)
@@ -389,7 +415,7 @@ static void draw_screen(uint32_t now)
         }
         else
         {
-            draw_text_box(shown, final_length, XL_MARGIN, english_y, text_w, 3U);
+            draw_text_box(shown, final_length, XL_MARGIN, english_y, text_w, XL_ENGLISH_LINES);
         }
     }
     else
@@ -410,9 +436,28 @@ static void draw_screen(uint32_t now)
     else
     {
         note = NULL;
-        mw_lcd_draw_string((uint16_t)XL_MARGIN, (uint16_t)hindi_y, "Hindi: (translation model", 1U, color_grey, true);
-        mw_lcd_draw_string((uint16_t)XL_MARGIN, (uint16_t)(hindi_y + line_height), "not installed yet)", 1U,
-                           color_grey, true);
+        if (!xl_translator_model_ok())
+        {
+            mw_lcd_draw_string((uint16_t)XL_MARGIN, (uint16_t)hindi_y, "Hindi: translation model", 1U, color_grey,
+                               true);
+            mw_lcd_draw_string((uint16_t)XL_MARGIN, (uint16_t)(hindi_y + line_height), "not flashed", 1U,
+                               color_grey, true);
+        }
+        else if (!font_ok)
+        {
+            mw_lcd_draw_string((uint16_t)XL_MARGIN, (uint16_t)hindi_y, "Hindi font not flashed", 1U, color_grey,
+                               true);
+        }
+        else if (hindi[0] != '\0')
+        {
+            const uint32_t lines = (uint32_t)((hindi_bottom - hindi_y) / (int32_t)xl_hindi_text_line_height());
+            (void)xl_hindi_text_draw_wrapped(XL_MARGIN, hindi_y, (uint32_t)text_w, (lines > 0U) ? lines : 1U, hindi,
+                                             color_dark);
+        }
+        else
+        {
+            mw_lcd_draw_string((uint16_t)XL_MARGIN, (uint16_t)hindi_y, "Hindi appears here.", 1U, color_grey, true);
+        }
     }
 
     /* Buttons. */
@@ -432,6 +477,7 @@ static void draw_screen(uint32_t now)
         LOG_ERROR("Translator: LCD present failed");
     }
     drawn_revision = revision;
+    drawn_activity = xl_translator_activity();
     drawn_mode = xl_router_mode();
     drawn_music = xl_router_music();
     drawn_source = xl_router_target();
@@ -578,7 +624,9 @@ static void handle_press(int32_t x, int32_t y, uint32_t now)
 static void enter_music(uint32_t now)
 {
     LOG_INFO("Translator: music has the speaker, N6 going to sleep");
-    audio_port_set_paused(1);
+    xl_translator_listen(XL_LISTEN_MUSIC, 1);
+    xl_translator_cancel(); /* music always wins: no translation, speech stops now */
+    xl_sentence_reset();
     if (audio_ok)
     {
         xl_audio_out_flush();
@@ -614,7 +662,7 @@ static void wake_translator(void)
     {
         lcd_power(1);
     }
-    audio_port_set_paused(0);
+    xl_translator_listen(XL_LISTEN_MUSIC, 0);
     if (audio_ok && (xl_audio_out_start() != 0))
     {
         LOG_ERROR("Translator: speaker stream did not restart");
@@ -662,12 +710,21 @@ void xl_display_start(void)
         LOG_WARNING("Translator: USER button not available");
     }
     xl_router_init();
+    font_ok = (xl_hindi_text_open((const void *)XL_MODEL_FONT_ADDR) == 0);
+    if (!font_ok)
+    {
+        LOG_WARNING("Translator: no Hindi font at 0x%08lx (flash.py n6 --models)", (unsigned long)XL_MODEL_FONT_ADDR);
+    }
     started_at = now_ms();
 }
 
 void xl_display_text(const char *final_text, uint32_t final_length, const char *tentative_text)
 {
     append_english(final_text, final_length);
+    if (state == STATE_TRANSLATING)
+    {
+        xl_sentence_feed(final_text, final_length, tentative_text, now_ms());
+    }
     (void)strncpy(tentative, tentative_text, sizeof(tentative) - 1U);
     tentative[sizeof(tentative) - 1U] = '\0';
     ++revision;
@@ -737,6 +794,20 @@ void xl_display_poll(void)
         chime_pending = 0;
     }
 
+    if (state == STATE_TRANSLATING)
+    {
+        char sentence[XL_SENTENCE_CAPACITY];
+
+        while (xl_sentence_take(sentence, sizeof(sentence), now) > 0U)
+        {
+            xl_translator_submit(sentence);
+        }
+    }
+    if (xl_translator_hindi(hindi, sizeof(hindi), &hindi_revision))
+    {
+        ++revision;
+    }
+
     if (state == STATE_MUSIC_SLEEP)
     {
         return;
@@ -746,7 +817,7 @@ void xl_display_poll(void)
         ++revision; /* the note expired */
     }
     if ((revision != drawn_revision) || (drawn_mode != xl_router_mode()) || (drawn_music != xl_router_music()) ||
-        (drawn_source != xl_router_target()))
+        (drawn_source != xl_router_target()) || (drawn_activity != xl_translator_activity()))
     {
         draw_screen(now);
     }

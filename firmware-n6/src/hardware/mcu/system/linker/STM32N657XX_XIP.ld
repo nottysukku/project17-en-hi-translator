@@ -38,7 +38,7 @@ ENTRY(Reset_Handler)
  *
  *   region         start        end          size    what lives there
  *   -------------  -----------  -----------  ------  ------------------------
- *   NOR_APP        0x70100400   0x71500000   ~20 MB  code, constants, .data
+ *   NOR_APP        0x70100400   0x70500000   ~4 MB   code, constants, .data
  *                                                    load image (the FSBL
  *                                                    jumps to 0x70100400)
  *   NONCACHEABLE   0x34000000   0x34002000     8 KB  DMA buffers (MPU region 0)
@@ -52,7 +52,9 @@ ENTRY(Reset_Handler)
  * there, so it is not in the MEMORY table; the regions above end where it
  * begins:
  *
- *   0x71500000   0x78000000   107 MB  network weights, in the NOR
+ *   0x70500000   0x78000000   123 MB  model blobs and network weights, in
+ *                                     the NOR (translator/models.json; the
+ *                                     recognizer's weights at 0x71500000)
  *   0x34064000   0x343C0000  3440 KB  NPU activations
  *   0x343C0000   0x34400000   256 KB  the NPU cache itself: never data
  *   0x90500000   0x92000000    27 MB  NPU activations, in the PSRAM
@@ -62,7 +64,7 @@ ENTRY(Reset_Handler)
  */
 MEMORY
 {
-  NOR_APP      (rx)  : ORIGIN = 0x70100400, LENGTH = 0x013FFC00
+  NOR_APP      (rx)  : ORIGIN = 0x70100400, LENGTH = 0x003FFC00
   NONCACHEABLE (rw)  : ORIGIN = 0x34000000, LENGTH = 0x00002000
   RAM          (rwx) : ORIGIN = 0x34002000, LENGTH = 0x00062000
   PSRAM        (rw)  : ORIGIN = 0x90000000, LENGTH = 0x00500000

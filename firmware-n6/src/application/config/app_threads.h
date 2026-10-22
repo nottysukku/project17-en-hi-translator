@@ -11,6 +11,7 @@
  *           |   10 | led      | application/led/      | heartbeat LED                      |
  *           |   11 | asr_net  | asr_engine/net/        | NPU inference + CTC                |
  *           |   12 | display  | application/display/  | redraws the transcript             |
+ *           |   13 | xl_translator | application/translator/ | translation and speech (translator mode) |
  *
  *           asr_mel must keep pace with capture; display is lowest, a late
  *           frame costs nothing. asr_engine reads the @c ASR_CONF_* values
@@ -67,5 +68,10 @@
 #else
 #define APP_DISPLAY_THREAD_STACK_BYTES    2048U
 #endif
+
+/** @brief Translator mode: translation and Hindi speech (translator/xl_translator.c). Lowest: it
+ *         computes for seconds, everything else preempts it. */
+#define APP_TRANSLATOR_THREAD_PRIORITY    13U
+#define APP_TRANSLATOR_THREAD_STACK_BYTES 8192U
 
 #endif /* APPLICATION_CONFIG_APP_THREADS_H */
