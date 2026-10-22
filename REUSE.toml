@@ -84,6 +84,11 @@ path = [
     "src/hardware/bsp/STM32N6570-DK/**",
     "src/hardware/components/mx66uw1g45g/**",
     "src/hardware/components/aps256xx/**",
+    # EDU mode touch screen, from STM32CubeN6 V1.4.1: stm32n6570_discovery_bus.c/.h
+    # (in STM32N6570-DK/ above), the gt911 component (gt911_conf.h is its
+    # gt911_conf_template.h) and Components/Common/ts.h.
+    "src/hardware/components/gt911/**",
+    "src/hardware/components/common/**",
 ]
 precedence = "override"
 SPDX-FileCopyrightText = "STMicroelectronics"
@@ -101,6 +106,9 @@ path = [
     "src/hardware/bsp/STM32N6570-DK/stm32n6570_discovery_xspi.c",
     # Include paths.
     "src/hardware/bsp/STM32N6570-DK/stm32n6570_discovery_xspi.h",
+    # Include paths (STM32CubeN6 V1.4.1, EDU mode touch screen).
+    "src/hardware/bsp/STM32N6570-DK/stm32n6570_discovery_ts.c",
+    "src/hardware/bsp/STM32N6570-DK/stm32n6570_discovery_ts.h",
     # HAL include.
     "src/hardware/components/aps256xx/aps256xx_conf.h",
     # HAL include.

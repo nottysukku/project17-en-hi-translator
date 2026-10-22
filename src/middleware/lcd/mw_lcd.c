@@ -453,6 +453,105 @@ mw_lcd_status_t mw_lcd_draw_image_centered(const mw_lcd_image_t *image)
                              image);
 }
 
+void mw_lcd_fill_rect(int32_t x, int32_t y, int32_t width, int32_t height, uint16_t color)
+{
+    int32_t x_end = x + width;
+    int32_t y_end = y + height;
+    int32_t row;
+
+    if (active_config.draw_buffer == NULL)
+    {
+        return;
+    }
+    /* Clip to the screen. */
+    x = (x < 0) ? 0 : x;
+    y = (y < 0) ? 0 : y;
+    x_end = (x_end > (int32_t)active_config.width) ? (int32_t)active_config.width : x_end;
+    y_end = (y_end > (int32_t)active_config.height) ? (int32_t)active_config.height : y_end;
+    for (row = y; row < y_end; ++row)
+    {
+        uint16_t *pixel = &active_config.draw_buffer[((uint32_t)row * active_config.stride_pixels) + (uint32_t)x];
+        int32_t column;
+
+        for (column = x; column < x_end; ++column)
+        {
+            *pixel++ = color;
+        }
+    }
+}
+
+void mw_lcd_draw_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t thickness, uint16_t color)
+{
+    const float ax = (float)x0 + 0.5f;
+    const float ay = (float)y0 + 0.5f;
+    const float dx = (float)(x1 - x0);
+    const float dy = (float)(y1 - y0);
+    const float length_squared = (dx * dx) + (dy * dy);
+    const float radius = (float)thickness * 0.5f;
+    const int32_t reach = (int32_t)radius + 2;
+    int32_t left = ((x0 < x1) ? x0 : x1) - reach;
+    int32_t right = ((x0 > x1) ? x0 : x1) + reach;
+    int32_t top = ((y0 < y1) ? y0 : y1) - reach;
+    int32_t bottom = ((y0 > y1) ? y0 : y1) + reach;
+    int32_t row;
+
+    if ((active_config.draw_buffer == NULL) || (thickness == 0U))
+    {
+        return;
+    }
+    left = (left < 0) ? 0 : left;
+    top = (top < 0) ? 0 : top;
+    right = (right >= (int32_t)active_config.width) ? ((int32_t)active_config.width - 1) : right;
+    bottom = (bottom >= (int32_t)active_config.height) ? ((int32_t)active_config.height - 1) : bottom;
+
+    /* For every pixel near the segment: its distance to the segment, then coverage of a round-capped
+       stroke of the given thickness, one pixel of anti-aliased edge. */
+    for (row = top; row <= bottom; ++row)
+    {
+        int32_t column;
+
+        for (column = left; column <= right; ++column)
+        {
+            const float px = ((float)column + 0.5f) - ax;
+            const float py = ((float)row + 0.5f) - ay;
+            float t = (length_squared > 0.0f) ? (((px * dx) + (py * dy)) / length_squared) : 0.0f;
+            float ex;
+            float ey;
+            float distance_squared;
+            float coverage;
+            uint32_t index;
+
+            t = (t < 0.0f) ? 0.0f : ((t > 1.0f) ? 1.0f : t);
+            ex = px - (t * dx);
+            ey = py - (t * dy);
+            distance_squared = (ex * ex) + (ey * ey);
+            if (distance_squared >= ((radius + 0.5f) * (radius + 0.5f)))
+            {
+                continue;
+            }
+            coverage = 1.0f;
+            if (distance_squared > ((radius - 0.5f) * (radius - 0.5f)))
+            {
+                float distance = distance_squared;
+                float guess = radius;
+                uint32_t step;
+
+                /* square root by Newton's method, from a guess close to it */
+                for (step = 0U; step < 3U; ++step)
+                {
+                    guess = 0.5f * (guess + (distance / guess));
+                }
+                distance = guess;
+                coverage = (radius + 0.5f) - distance;
+                coverage = (coverage < 0.0f) ? 0.0f : ((coverage > 1.0f) ? 1.0f : coverage);
+            }
+            index = ((uint32_t)row * active_config.stride_pixels) + (uint32_t)column;
+            active_config.draw_buffer[index] =
+                lcd_blend_rgb565(active_config.draw_buffer[index], color, (uint8_t)(coverage * 255.0f));
+        }
+    }
+}
+
 uint32_t mw_lcd_get_line_height(uint16_t scale)
 {
     return MW_LCD_FONT_LINE_HEIGHT * scale;

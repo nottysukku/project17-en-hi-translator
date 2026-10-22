@@ -31,6 +31,11 @@
 #define BSP_BUTTON_USER1_IT_PRIORITY 15U
 #define BSP_BUTTON_TAMP_IT_PRIORITY  15U
 
+/* Touch screen (EDU mode, stm32n6570_discovery_ts.c): one touch point, polled. */
+#define USE_TS_GESTURE      0U
+#define USE_TS_MULTI_TOUCH  0U
+#define BSP_TS_IT_PRIORITY  15U
+
 /* Memory map: base addresses of the external memories only. */
 
 /** @brief MX66UW1G45G NOR on XSPI2, mapped by the FSBL; the app executes from it. */

@@ -32,3 +32,9 @@ target_compile_definitions(threadx PUBLIC
     TX_INCLUDE_USER_DEFINE_FILE
     TX_SINGLE_MODE_SECURE)
 target_link_libraries(threadx PUBLIC stm32n6_hal)
+
+# Translator mode sleeps while Bluetooth music plays: the scheduler waits for interrupts
+# with WFI (tx_thread_schedule.S) instead of spinning when no thread is ready.
+if(APP_TRANSLATOR_MODE)
+    target_compile_definitions(threadx PRIVATE TX_ENABLE_WFI)
+endif()

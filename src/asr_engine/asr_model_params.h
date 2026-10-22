@@ -94,8 +94,16 @@
 /** @brief Class of the CTC blank. */
 #define ASR_MODEL_NET_BLANK_INDEX 0U
 
-/** @brief Character of every output class, in class order; the blank's is a placeholder. */
+/**
+ * @brief Character of every output class, in class order; the blank's is a placeholder.
+ * @note A model trained with punctuation defines its own in network_shape.h, the same 29 classes
+ *       followed by ",.?", together with @c ASR_MODEL_NET_PUNCT_FIRST_INDEX: the classes from
+ *       there on are marks that end a word, so the decoder prints no space before them and one
+ *       after, and the display shows such a model's text in sentence case.
+ */
+#ifndef ASR_MODEL_NET_TOKENS
 #define ASR_MODEL_NET_TOKENS "_ ABCDEFGHIJKLMNOPQRSTUVWXYZ'"
+#endif
 
 /** @brief Class of the space, the word separator in @c ASR_MODEL_NET_TOKENS. */
 #define ASR_MODEL_NET_SPACE_INDEX 1U
@@ -105,5 +113,18 @@
  * @note Shorter joins fewer words but may split a slowly spoken one.
  */
 #define ASR_MODEL_NET_PAUSE_SPACE_FRAMES 30U
+
+/**
+ * @brief Models with punctuation: silence after a word that commits the mark the network put at
+ *        the end of the previous window; tunable.
+ * @note Where the audio it sees ends, the network ends the sentence, so a speaker who stops gets a
+ *       full stop at the edge of every window, which is only tentative text and is never
+ *       committed. After this much committed silence the decoder commits it there. Measured
+ *       on the board path (cynipsnet_punct1, LibriSpeech-PC dev-clean): full-stop F1 5 without
+ *       the rule, 64 at 0.8 s, 78 at 1.0 s, 80 at 1.2 s; shorter also cuts commas short.
+ */
+#ifndef ASR_MODEL_NET_END_MARK_FRAMES
+#define ASR_MODEL_NET_END_MARK_FRAMES 100U
+#endif
 
 #endif /* ASR_ENGINE_ASR_MODEL_PARAMS_H */

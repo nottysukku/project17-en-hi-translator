@@ -17,6 +17,7 @@ set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 set(TOOLCHAIN_PREFIX "arm-none-eabi" CACHE STRING "GNU Arm Embedded toolchain prefix")
 
 file(GLOB _stm32_gnu_bins
+  "C:/ST/STM32CubeIDE_*/STM32CubeIDE/plugins/*gnu-tools-for-stm32*/tools/bin"
   "$ENV{HOME}/st/stm32cubeide_*/plugins/*gnu-tools-for-stm32*/tools/bin"
   "$ENV{HOME}/STM32CubeIDE/plugins/*gnu-tools-for-stm32*/tools/bin"
   "/opt/st/stm32cubeide_*/plugins/*gnu-tools-for-stm32*/tools/bin")

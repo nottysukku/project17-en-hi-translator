@@ -42,6 +42,15 @@ uint32_t audio_port_start(void);
  */
 const asr_audio_port_t *audio_port_get(void);
 
+/**
+ * @brief Pause or resume recognition at its source: while paused, captured chunks are not
+ *        handed to asr_engine, so its threads and the NPU stay idle (the microphone keeps running,
+ *        as drv_pdm cannot restart). On resume the audio captured meanwhile is dropped.
+ * @param[in] paused Non-zero to pause.
+ * @note Call from one thread; used by the translator to sleep while Bluetooth music plays.
+ */
+void audio_port_set_paused(int paused);
+
 #ifdef __cplusplus
 }
 #endif

@@ -26,6 +26,10 @@
 #include "display_thread.h"
 #include "drv_npu.h"
 #include "drv_uart.h"
+
+#ifdef APP_AUDIO_CAPTURE
+#include "capture.h"
+#endif
 #include "led_thread.h"
 #include "logger.h"
 #include "main.h"
@@ -99,10 +103,19 @@ static ULONG startup_thread_stack[APP_STARTUP_THREAD_STACK_BYTES / sizeof(ULONG)
 /** @brief Attach the logger to the console UART that bsp_init() opened. */
 static uint32_t logger_start(void)
 {
+#ifdef APP_AUDIO_CAPTURE
+  /* Data-collection build: the capture thread owns the UART; log text travels in its packets. */
+  if ((capture_start() != 0U) || (logger_init(capture_log_try_write, capture_log_ready) != LOGGER_OK))
+  {
+    return 1U;
+  }
+  LOG_INFO("Audio capture mode: microphone streamed over UART (board_record.py)");
+#else
   if (logger_init(drv_uart_write, drv_uart_tx_ready) != LOGGER_OK)
   {
     return 1U;
   }
+#endif
   LOG_INFO("%s, firmware v%s, model %s v%s", BOARD_NAME, VERSION_STRING, ASR_MODEL_NAME,
            ASR_MODEL_VERSION);
   return APP_MODULE_OK;

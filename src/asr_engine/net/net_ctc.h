@@ -16,6 +16,7 @@
 #include <stdint.h>
 
 #include "net_cfg.h"
+#include "net_ctc_beam.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,11 +35,39 @@ typedef struct
     int32_t printed_class;
     /** @brief Blank steps since the last non-blank one, saturated at @c NET_PAUSE_SPACE_STEPS. */
     uint32_t pause_steps;
+    /**
+     * @brief Non-zero when a space or a mark ended the last word, so the next letter is printed
+     *        after a space (models with punctuation; they defer spaces so none precedes a mark).
+     */
+    uint32_t pending_space;
+    /**
+     * @brief Mark that ended the previous window's tentative text, -1 if none: the network's end of
+     *        sentence where the audio it saw ended (models with punctuation).
+     */
+    int32_t edge_mark;
+    /** @brief Blank steps since the last non-blank one, saturated at @c NET_END_MARK_STEPS. */
+    uint32_t silence_steps;
+#if defined(ASR_CONF_DECODER_BEAM_SEARCH) && (ASR_CONF_DECODER_BEAM_SEARCH != 0)
+    /** @brief Embedded CTC Prefix Beam Search state. */
+    net_beam_state_t beam;
+#endif
 } net_ctc_state_t;
 
 /*******************************************************************************/
 /*                               PUBLIC FUNCTIONS                              */
 /*******************************************************************************/
+
+/**
+ * @brief Register a domain hotword to boost its detection probability in beam search.
+ * @param[in] word Uppercase word string.
+ * @param[in] weight Bonus weight (> 0).
+ */
+void net_ctc_add_hotword(const char *word, float weight);
+
+/**
+ * @brief Clear registered hotwords table.
+ */
+void net_ctc_clear_hotwords(void);
 
 /**
  * @brief Start a new stream.

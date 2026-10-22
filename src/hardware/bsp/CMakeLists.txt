@@ -19,6 +19,17 @@ add_library(bsp_st OBJECT
     STM32N6570-DK/stm32n6570_discovery_xspi.c)
 target_link_libraries(bsp_st PUBLIC boards mx66uw1g45g aps256xx)
 
+# Touch screen, EDU and translator modes only: the ST BSP touch and I2C bus drivers
+# (include paths changed, see REUSE.toml), configured by stm32n6570_discovery_conf.h next
+# to this file. Polled from the display thread; no interrupt.
+if(APP_EDU_MODE OR APP_TRANSLATOR_MODE)
+    add_library(bsp_touch
+        STM32N6570-DK/stm32n6570_discovery_ts.c
+        STM32N6570-DK/stm32n6570_discovery_bus.c)
+    target_include_directories(bsp_touch PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/STM32N6570-DK)
+    target_link_libraries(bsp_touch PUBLIC boards gt911)
+endif()
+
 # Project BSP: start-up sequence and board devices.
 add_library(bsp
     bsp.c

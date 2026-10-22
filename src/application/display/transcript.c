@@ -16,9 +16,19 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "asr_model_params.h"
+#include "text_case.h"
+
 /*******************************************************************************/
 /*                               PRIVATE DEFINES                               */
 /*******************************************************************************/
+
+/** @brief Show the text in sentence case: models trained with punctuation (asr_model_params.h). */
+#if defined(ASR_MODEL_NET_PUNCT_FIRST_INDEX)
+#define TRANSCRIPT_SENTENCE_CASE   1
+#else
+#define TRANSCRIPT_SENTENCE_CASE   0
+#endif
 
 /** @brief Font scale of the text. */
 #define TRANSCRIPT_TEXT_SCALE      1U
@@ -48,15 +58,44 @@ static uint32_t transcript_length;
 /** @brief Tentative tail drawn after the final text, NUL-terminated. */
 static char tentative[TRANSCRIPT_TENTATIVE_CAPACITY];
 
+#if TRANSCRIPT_SENTENCE_CASE
+/** @brief Final text and tentative tail as shown, in sentence case; rebuilt by refresh_shown(). */
+static char shown[TRANSCRIPT_CAPACITY + TRANSCRIPT_TENTATIVE_CAPACITY];
+
+/** @brief Non-zero when the final text begins a sentence (no older text was cut mid-sentence). */
+static int transcript_starts_sentence = 1;
+#endif
+
 /*******************************************************************************/
 /*                              PRIVATE FUNCTIONS                              */
 /*******************************************************************************/
 
-/** @brief Character @p index of the final text followed by the tentative tail. */
+/** @brief Character @p index of the final text followed by the tentative tail, as shown. */
 static char text_at(uint32_t index)
 {
+#if TRANSCRIPT_SENTENCE_CASE
+  return shown[index];
+#else
   return (index < transcript_length) ? transcript[index]
                                      : tentative[index - transcript_length];
+#endif
+}
+
+/**
+ * @brief Prepare what text_at() returns for the current text.
+ * @return Characters of final text plus tentative tail.
+ */
+static uint32_t refresh_shown(void)
+{
+  const uint32_t tail = (uint32_t)strlen(tentative);
+
+#if TRANSCRIPT_SENTENCE_CASE
+  /* Cased over the whole text each time: the case of a letter depends on what precedes it. */
+  (void)memcpy(shown, transcript, transcript_length);
+  (void)memcpy(&shown[transcript_length], tentative, tail);
+  text_sentence_case(shown, transcript_length + tail, transcript_starts_sentence);
+#endif
+  return transcript_length + tail;
 }
 
 /** @brief Advance of one character at the text scale. */
@@ -174,6 +213,21 @@ void transcript_append(const char *text, uint32_t length)
     {
       drop = transcript_length;
     }
+#if TRANSCRIPT_SENTENCE_CASE
+    {
+      /* What is left starts a sentence if the text cut away ended one. */
+      uint32_t last = drop;
+
+      while ((last > 0U) && (transcript[last - 1U] == ' '))
+      {
+        --last;
+      }
+      if (last > 0U)
+      {
+        transcript_starts_sentence = (transcript[last - 1U] == '.') || (transcript[last - 1U] == '?');
+      }
+    }
+#endif
     (void)memmove(transcript, &transcript[drop], transcript_length - drop);
     transcript_length -= drop;
   }
@@ -189,7 +243,7 @@ void transcript_set_tentative(const char *text)
 
 int transcript_has_text(void)
 {
-  const uint32_t total = transcript_length + (uint32_t)strlen(tentative);
+  const uint32_t total = refresh_shown();
   uint32_t index;
 
   for (index = 0U; index < total; ++index)
@@ -204,7 +258,7 @@ int transcript_has_text(void)
 
 mw_lcd_status_t transcript_draw(void)
 {
-  const uint32_t total = transcript_length + (uint32_t)strlen(tentative);
+  const uint32_t total = refresh_shown();
   const uint32_t visible = ((uint32_t)mw_lcd_get_height() - (2U * TRANSCRIPT_MARGIN_PIXELS)) /
                            mw_lcd_get_line_height(TRANSCRIPT_TEXT_SCALE);
   const uint32_t lines = layout_text(total, 0U, 0);

@@ -18,22 +18,36 @@
 #include "asr_engine.h"
 #include "bsp_mic.h"
 
+#ifdef APP_AUDIO_CAPTURE
+#include "capture.h"
+#endif
+
+/*******************************************************************************/
+/*                              PRIVATE VARIABLES                              */
+/*******************************************************************************/
+
+/** @brief Non-zero while recognition is paused (audio_port_set_paused()). */
+static volatile int paused;
+
 /*******************************************************************************/
 /*                              PRIVATE FUNCTIONS                              */
 /*******************************************************************************/
 
-/** @brief Wake the conversion thread once per completed capture chunk. */
+/** @brief Wake the conversion thread once per completed capture chunk, unless paused. */
 static void chunk_ready_callback(void *context)
 {
   (void)context;
-  asr_engine_audio_chunk_ready();
+  if (!paused)
+  {
+    asr_engine_audio_chunk_ready();
+  }
 }
 
-/** @brief Forward to drv_pdm_available_chunks(). */
+/** @brief Forward to drv_pdm_available_chunks(); none while paused. */
 static uint32_t port_available_chunks(void *context)
 {
   (void)context;
-  return drv_pdm_available_chunks();
+  return paused ? 0U : drv_pdm_available_chunks();
 }
 
 /** @brief Forward to drv_pdm_read(), with its status as the driver-agnostic asr_audio_status_t. */
@@ -46,6 +60,10 @@ static asr_audio_status_t port_read(void *context,
   switch (drv_pdm_read(destination, destination_samples, chunks))
   {
   case DRV_PDM_OK:
+#ifdef APP_AUDIO_CAPTURE
+    /* Exactly the samples the recognizer is about to process. */
+    capture_push_audio(destination, chunks * ASR_MODEL_MEL_HOP_SAMPLES);
+#endif
     return ASR_AUDIO_OK;
   case DRV_PDM_UNDERRUN:
     return ASR_AUDIO_UNDERRUN;
@@ -76,6 +94,25 @@ uint32_t audio_port_start(void)
   config.chunk_callback = chunk_ready_callback;
   config.callback_context = NULL;
   return (uint32_t)bsp_mic_start(&config);
+}
+
+void audio_port_set_paused(int pause)
+{
+  if (!pause && paused)
+  {
+    /* Drop what was captured while paused: it is stale, and the ring overflowed meanwhile. */
+    uint32_t chunks;
+
+    (void)drv_pdm_take_dropped_chunks();
+    while ((chunks = drv_pdm_available_chunks()) > 0U)
+    {
+      if (drv_pdm_skip(chunks) != DRV_PDM_OK)
+      {
+        break;
+      }
+    }
+  }
+  paused = (pause != 0);
 }
 
 const asr_audio_port_t *audio_port_get(void)

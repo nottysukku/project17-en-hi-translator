@@ -46,6 +46,31 @@ add_link_options(
     -Wl,--no-warn-rwx-segments
     -Wl,--print-memory-usage)
 
+# Times-table quiz on the board (src/application/edu/): the LCD asks "23 x 8 = ?",
+# the recognized words are checked on the board and marked with a tick or a cross.
+# It replaces the transcript screen and adds the touch screen (GT911 on I2C2). Set
+# here because hardware/ (the HAL's I2C module, the touch driver) depends on it.
+option(APP_EDU_MODE "Times-table quiz on the LCD instead of the transcript" OFF)
+if(APP_EDU_MODE)
+    add_compile_definitions(APP_EDU_MODE=1)
+    # Stack frame of every function (*.su next to the objects; no code change), for
+    # src/application/edu/tools/stack_report.py: the display thread now does more.
+    add_compile_options($<$<COMPILE_LANGUAGE:C>:-fstack-usage>)
+endif()
+
+# English-to-Hindi translator (src/application/translator/): the N6 shares one MAX98357A
+# speaker with a STM32WBA55 Bluetooth music receiver through a TMUX1574 switch, sleeps while
+# music plays, and has touch buttons for the source. Like EDU mode it replaces the transcript
+# screen and needs the touch screen; it also enables SAI2 for the speaker.
+option(APP_TRANSLATOR_MODE "English-to-Hindi translator sharing a speaker with Bluetooth music" OFF)
+if(APP_TRANSLATOR_MODE)
+    if(APP_EDU_MODE)
+        message(FATAL_ERROR "APP_TRANSLATOR_MODE and APP_EDU_MODE both replace the screen: choose one")
+    endif()
+    add_compile_definitions(APP_TRANSLATOR_MODE=1)
+    add_compile_options($<$<COMPILE_LANGUAGE:C>:-fstack-usage>)
+endif()
+
 # The project builds exactly one image: the XIP application the FSBL starts in
 # place from external NOR (STM32N657XX_XIP.ld, preset "default").
 add_subdirectory(src)

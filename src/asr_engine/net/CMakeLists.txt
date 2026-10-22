@@ -5,6 +5,7 @@
 # inference thread (net_thread.c).
 add_library(asr_net
     net_ctc.c
+    net_ctc_beam.c
     net_npu.c
     net_thread.c)
 # The parent directory provides asr_model_params.h and asr_engine.h.

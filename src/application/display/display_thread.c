@@ -26,6 +26,12 @@
 #include "transcript.h"
 #include "tx_api.h"
 
+#if defined(APP_EDU_MODE)
+#include "edu_display.h"
+#elif defined(APP_TRANSLATOR_MODE)
+#include "xl_display.h"
+#endif
+
 /*******************************************************************************/
 /*                               PRIVATE DEFINES                               */
 /*******************************************************************************/
@@ -131,8 +137,16 @@ static void take_mailbox(void)
   {
     return;
   }
+#if defined(APP_EDU_MODE)
+  /* EDU mode: the quiz takes the text instead of the transcript (copies only). */
+  edu_display_text(mailbox_final, mailbox_final_length, mailbox_tentative);
+#elif defined(APP_TRANSLATOR_MODE)
+  /* Translator mode: its screen takes the text (copies only). */
+  xl_display_text(mailbox_final, mailbox_final_length, mailbox_tentative);
+#else
   transcript_append(mailbox_final, mailbox_final_length);
   transcript_set_tentative(mailbox_tentative);
+#endif
   mailbox_final_length = 0U;
   mailbox_final[0] = '\0';
   (void)tx_mutex_put(&mailbox_mutex);
@@ -148,6 +162,29 @@ static void display_thread_entry(ULONG argument)
   int text_started = 0;
 
   (void)argument;
+#if defined(APP_EDU_MODE)
+  /* EDU mode: the times-table quiz. Wake on new text or every poll period, for the
+     touch screen, the USER button and the quiz's timers. */
+  (void)text_started;
+  edu_display_start();
+  for (;;)
+  {
+    (void)tx_semaphore_get(&mailbox_semaphore, EDU_DISPLAY_POLL_TICKS);
+    take_mailbox();
+    edu_display_poll();
+  }
+#elif defined(APP_TRANSLATOR_MODE)
+  /* Translator mode: wake on new text or every poll period (shorter while the screen is on),
+     for the touch screen, the speaker router and the power states. */
+  (void)text_started;
+  xl_display_start();
+  for (;;)
+  {
+    (void)tx_semaphore_get(&mailbox_semaphore, xl_display_poll_ticks());
+    take_mailbox();
+    xl_display_poll();
+  }
+#endif
   for (;;)
   {
     if (tx_semaphore_get(&mailbox_semaphore, TX_WAIT_FOREVER) != TX_SUCCESS)

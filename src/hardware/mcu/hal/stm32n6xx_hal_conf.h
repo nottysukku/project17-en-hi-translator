@@ -49,6 +49,9 @@ extern "C" {
 /*#define HAL_HASH_MODULE_ENABLED   */
 /*#define HAL_HCD_MODULE_ENABLED   */
 /*#define HAL_I2C_MODULE_ENABLED   */
+#if defined(APP_EDU_MODE) || defined(APP_TRANSLATOR_MODE)
+#define HAL_I2C_MODULE_ENABLED /* EDU and translator modes: the touch screen (GT911 on I2C2) */
+#endif
 /*#define HAL_I2S_MODULE_ENABLED   */
 /*#define HAL_I3C_MODULE_ENABLED   */
 /*#define HAL_ICACHE_MODULE_ENABLED   */
@@ -70,6 +73,9 @@ extern "C" {
 /*#define HAL_RNG_MODULE_ENABLED   */
 /*#define HAL_RTC_MODULE_ENABLED   */
 /*#define HAL_SAI_MODULE_ENABLED   */
+#if defined(APP_TRANSLATOR_MODE)
+#define HAL_SAI_MODULE_ENABLED /* translator mode: the speaker (SAI2 block B, I2S) */
+#endif
 /*#define HAL_SD_MODULE_ENABLED   */
 /*#define HAL_SDIO_MODULE_ENABLED   */
 /*#define HAL_SDRAM_MODULE_ENABLED   */

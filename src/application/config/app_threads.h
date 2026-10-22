@@ -46,12 +46,26 @@
 #define APP_LED_THREAD_PRIORITY           10U
 #define APP_LED_THREAD_STACK_BYTES        1024U
 
+/** @brief Audio capture sender (capture/capture.c), data-collection builds only. */
+#define APP_CAPTURE_THREAD_PRIORITY       10U
+#define APP_CAPTURE_THREAD_STACK_BYTES    2048U
+
 /** @brief asr_engine network stage: NPU inference and CTC decoding. */
 #define ASR_CONF_NET_THREAD_PRIORITY      11U
 #define ASR_CONF_NET_THREAD_STACK_BYTES   4096U
 
 /** @brief Transcript on the LCD (display/display_thread.c). */
 #define APP_DISPLAY_THREAD_PRIORITY       12U
+#if defined(APP_EDU_MODE)
+/* EDU mode: the display thread also checks the answers (edu_math.c) and reads the
+   touch screen; its deepest call chain is measured by edu/tools/stack_report.py. */
+#define APP_DISPLAY_THREAD_STACK_BYTES    4096U
+#elif defined(APP_TRANSLATOR_MODE)
+/* Translator mode: the display thread draws the screen, reads the touch screen and runs the
+   speaker router; measured with -fstack-usage like EDU mode, with margin. */
+#define APP_DISPLAY_THREAD_STACK_BYTES    6144U
+#else
 #define APP_DISPLAY_THREAD_STACK_BYTES    2048U
+#endif
 
 #endif /* APPLICATION_CONFIG_APP_THREADS_H */

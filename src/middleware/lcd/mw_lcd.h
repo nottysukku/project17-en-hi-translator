@@ -140,6 +140,28 @@ mw_lcd_status_t mw_lcd_draw_image(int32_t x,
 mw_lcd_status_t mw_lcd_draw_image_centered(const mw_lcd_image_t *image);
 
 /**
+ * @brief Fill a rectangle of the hidden framebuffer with one color.
+ * @param[in] x Left edge in pixels; the part off screen is clipped.
+ * @param[in] y Top edge in pixels; the part off screen is clipped.
+ * @param[in] width Width in pixels; zero or negative draws nothing.
+ * @param[in] height Height in pixels; zero or negative draws nothing.
+ * @param[in] color RGB565 fill color.
+ */
+void mw_lcd_fill_rect(int32_t x, int32_t y, int32_t width, int32_t height, uint16_t color);
+
+/**
+ * @brief Draw a thick, round-capped, anti-aliased line into the hidden framebuffer.
+ * @param[in] x0 Start x in pixels.
+ * @param[in] y0 Start y in pixels.
+ * @param[in] x1 End x in pixels.
+ * @param[in] y1 End y in pixels.
+ * @param[in] thickness Stroke width in pixels; zero draws nothing.
+ * @param[in] color RGB565 color, blended over what is there at the edges.
+ * @note Pixels off screen are clipped. Meant for a few large shapes (a tick, a cross).
+ */
+void mw_lcd_draw_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t thickness, uint16_t color);
+
+/**
  * @brief Get the line advance for the bundled 48-pixel font.
  * @param[in] scale Integer font scale.
  * @return Line height in pixels, or zero for scale zero.

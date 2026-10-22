@@ -40,5 +40,29 @@ target_link_libraries(app PRIVATE
     app_display
     app_audio)
 
+# Data-collection build: stream the microphone over the console UART (capture/capture.h).
+option(APP_AUDIO_CAPTURE "Stream microphone audio over the console UART for collecting training data" OFF)
+if(APP_AUDIO_CAPTURE)
+    add_subdirectory(capture)
+    target_link_libraries(app PRIVATE app_capture)
+    target_link_libraries(app_audio PRIVATE app_capture)
+endif()
+
+# Times-table quiz on the LCD instead of the transcript (edu/). The option is set in
+# the top-level CMakeLists.txt, as the HAL and the touch-screen driver depend on it.
+if(APP_EDU_MODE)
+    add_subdirectory(edu)
+    target_link_libraries(app PRIVATE app_edu)
+    target_link_libraries(app_display PRIVATE app_edu)
+endif()
+
+# English-to-Hindi translator on the LCD and the shared speaker (translator/). The option is
+# set in the top-level CMakeLists.txt, as the HAL (SAI, I2C) and the touch driver depend on it.
+if(APP_TRANSLATOR_MODE)
+    add_subdirectory(translator)
+    target_link_libraries(app PRIVATE app_translator)
+    target_link_libraries(app_display PRIVATE app_translator)
+endif()
+
 stm32n6_track_linker_script(app ${APP_LINKER_SCRIPT})
 stm32n6_emit_image(app)
