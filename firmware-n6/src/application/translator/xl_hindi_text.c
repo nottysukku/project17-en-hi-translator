@@ -35,6 +35,9 @@ typedef struct
 static const uint8_t *font;
 static const hift_header_t *hdr;
 
+/** @brief Widest syllable bitmap row in bytes (width < 256 pixels, two per byte). */
+#define XL_HINDI_ROW_BYTES 128U
+
 /* ------------------------------------------------------------------------------------------ */
 /*                                       UTF-8 and syllables                                  */
 /* ------------------------------------------------------------------------------------------ */
@@ -201,6 +204,44 @@ static const hift_entry_t *find(const char *s, uint32_t len)
     return NULL;
 }
 
+/**
+ * @brief Blit one syllable bitmap. Version 1 fonts store rows of 4-bit alpha, two pixels per byte;
+ *        version 2 (hi_font_rle.py) stores runs, each byte value << 4 | (length - 1), running on
+ *        across rows, and is decoded here one row at a time.
+ */
+static void blit(int32_t x, int32_t y, const hift_entry_t *e, uint16_t color)
+{
+    const uint8_t *src = font + hdr->bitmaps_off + e->bmp_off;
+    uint8_t row[XL_HINDI_ROW_BYTES];
+    uint32_t r, c, left = 0;
+    uint8_t value = 0;
+
+    if (hdr->version == 1U)
+    {
+        mw_lcd_draw_alpha4(x, y, e->width, e->height, src, color);
+        return;
+    }
+    for (r = 0; r < e->height; ++r)
+    {
+        memset(row, 0, ((uint32_t)e->width + 1U) / 2U);
+        for (c = 0; c < e->width; ++c)
+        {
+            if (left == 0U)
+            {
+                value = (uint8_t)(*src >> 4);
+                left = (uint32_t)(*src & 0x0FU) + 1U;
+                src++;
+            }
+            if (value != 0U)
+            {
+                row[c >> 1] |= (uint8_t)(((c & 1U) != 0U) ? value : (uint8_t)(value << 4));
+            }
+            left--;
+        }
+        mw_lcd_draw_alpha4(x, y + (int32_t)r, e->width, 1U, row, color);
+    }
+}
+
 /** @brief Draw (if draw) and measure one syllable; letter by letter if it is not in the font. */
 static uint32_t syllable(int32_t x, int32_t baseline, const char *s, uint32_t len, int draw, uint16_t color)
 {
@@ -211,8 +252,7 @@ static uint32_t syllable(int32_t x, int32_t baseline, const char *s, uint32_t le
     {
         if (draw && (e->width > 0U))
         {
-            mw_lcd_draw_alpha4(x + e->x_off, baseline + e->y_off, e->width, e->height,
-                               font + hdr->bitmaps_off + e->bmp_off, color);
+            blit(x + e->x_off, baseline + e->y_off, e, color);
         }
         return e->advance;
     }
@@ -228,8 +268,7 @@ static uint32_t syllable(int32_t x, int32_t baseline, const char *s, uint32_t le
         {
             if (draw && (e->width > 0U))
             {
-                mw_lcd_draw_alpha4(x + (int32_t)adv + e->x_off, baseline + e->y_off, e->width, e->height,
-                                   font + hdr->bitmaps_off + e->bmp_off, color);
+                blit(x + (int32_t)adv + e->x_off, baseline + e->y_off, e, color);
             }
             adv += e->advance;
         }
@@ -268,7 +307,7 @@ int xl_hindi_text_open(const void *blob)
 {
     const hift_header_t *h = (const hift_header_t *)blob;
 
-    if ((h == NULL) || (memcmp(h->magic, "HIFT", 4) != 0) || (h->version != 1U))
+    if ((h == NULL) || (memcmp(h->magic, "HIFT", 4) != 0) || ((h->version != 1U) && (h->version != 2U)))
     {
         font = NULL;
         hdr = NULL;

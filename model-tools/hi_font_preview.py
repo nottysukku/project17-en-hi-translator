@@ -7,14 +7,14 @@ from PIL import Image
 
 sys.path.insert(0, __file__.rsplit("\\", 1)[0].rsplit("/", 1)[0])
 from hi_font_build import clusters  # noqa: E402
+from hi_font_rle import read  # noqa: E402
 
 sys.stdout.reconfigure(encoding="utf-8")
 blob = open(sys.argv[1], "rb").read()
 magic, ver, px, asc, desc, line_h, count, idx_off, str_off, bmp_off = struct.unpack_from("<4s9I", blob, 0)
 table = {}
-for i in range(count):
-    so, bo, sl, adv, w, h, x0, y0 = struct.unpack_from("<IIHHBBbb", blob, idx_off + 16 * i)
-    table[blob[str_off + so:str_off + so + sl].decode("utf-8")] = (bo, adv, w, h, x0, y0)
+for (so, bo, sl, adv, w, h, x0, y0), px in read(blob)[1]:  # version 1 or 2 (run-length coded)
+    table[blob[str_off + so:str_off + so + sl].decode("utf-8")] = (px, adv, w, h, x0, y0)
 missing = [k for k, v in table.items() if v[2] == 0 and not k.isspace()]
 print("empty glyphs:", len(missing), "".join(sorted(missing))[:200])
 
@@ -32,13 +32,11 @@ for li, text in enumerate(LINES):
         for p in parts:
             if p not in table:
                 continue
-            bo, adv, w, h, x0, y0 = table[p]
+            px, adv, w, h, x0, y0 = table[p]
             if w:
-                row_bytes = (w + 1) // 2
                 for r in range(h):
                     for c in range(w):
-                        b = blob[bmp_off + bo + r * row_bytes + c // 2]
-                        a = ((b >> 4) if c % 2 == 0 else (b & 15)) / 15.0
+                        a = px[r * w + c] / 15.0
                         yy, xx = base + y0 + r, x + x0 + c
                         if 0 <= yy < H and 0 <= xx < W:
                             img[yy, xx] = min(img[yy, xx], 255 * (1 - a))

@@ -12,10 +12,12 @@ Blob layout (little-endian):
   index:  count x {str_off u32, bmp_off u32, str_len u16, advance u16, width u8, height u8,
                    x_off i8, y_off i8}  sorted by the cluster's UTF-8 bytes
           (x_off: pen to bitmap left; y_off: baseline to bitmap top, negative is up)
-  strings, then bitmaps: rows of 4-bit alpha, two pixels per byte, high nibble first, rows padded
-  to whole bytes.
+  strings, then bitmaps: version 2 (written here) run-length codes each bitmap, see hi_font_rle.py;
+  version 1 stored rows of 4-bit alpha, two pixels per byte, high nibble first, rows padded to
+  whole bytes. The board reads both.
 """
 import json
+import os
 import struct
 import sys
 from collections import Counter
@@ -24,6 +26,9 @@ import freetype
 import numpy as np
 import pandas as pd
 import uharfbuzz as hb
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from hi_font_rle import read, write  # noqa: E402
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -164,6 +169,7 @@ def main():
     hdr = struct.pack("<4s9I", b"HIFT", 1, px, asc, desc, line_height, len(entries), index_off, strings_off, bitmaps_off)
     hdr += b"\0" * (header_size - len(hdr))
     data = hdr + index + strings + bitmaps
+    data = write(*read(data), data)  # version 2: run-length coded bitmaps
     open(out_path, "wb").write(data)
     json.dump(dict(px=px, weight=weight, count=len(entries), bytes=len(data), missing_glyphs=missing),
               open(out_path + ".json", "w"))

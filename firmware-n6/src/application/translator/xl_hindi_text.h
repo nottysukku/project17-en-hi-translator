@@ -6,7 +6,8 @@
  *           shaped and rasterised on the PC (Noto Sans Devanagari, 4-bit alpha). Here text is
  *           split into syllables with the same rules, each is looked up and blended into the
  *           framebuffer (mw_lcd_draw_alpha4). A syllable missing from the table is drawn
- *           letter by letter.
+ *           letter by letter. Fonts of version 2 are run-length coded (hi_font_rle.py), about
+ *           half the size, and decoded one row at a time while drawing.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
