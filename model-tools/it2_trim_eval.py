@@ -6,6 +6,7 @@ A variant is name:option,option,... with options
     src=N        keep N source embedding rows (it2_pack.py --src-keep)
     tgt=FILE     target vocabulary json (vocab_trim.py; default assets/hindi_vocab.json)
     dec=a.b.c    decoder layers to keep (default all 18)
+    s8=1         8-bit scale codes (it2_pack.py --scale8)
 for example  base:  s16k:src=16000  t31k:tgt=out/hindi_vocab_31k.json  d17:dec=0.1.2...16
 The first variant is the reference for the "same translation" column. Variants are scored in
 parallel (one C process each). Prints one line per variant: size, chrF++ and identical outputs.
@@ -31,7 +32,7 @@ def parse(spec):
 def pack(model_dir, out_dir, name, o):
     blob = os.path.join(out_dir, "it2_%s.bin" % name)
     cmd = [PY, os.path.join(HERE, "it2_pack.py"), model_dir, o["tgt"], blob,
-           "--dec-layers", o["dec"].replace(".", ","), "--src-keep", o["src"]]
+           "--dec-layers", o["dec"].replace(".", ","), "--src-keep", o["src"]] + (["--scale8"] if o.get("s8") else [])
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
     return blob
 

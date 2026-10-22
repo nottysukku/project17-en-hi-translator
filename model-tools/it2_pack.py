@@ -8,6 +8,9 @@ Layout (little-endian; every section 64-byte aligned):
     kind 0 = float32 vector/matrix; kind 1 = Q4: signed 4-bit, groups of 64 along a row,
     one float16 scale per group. A 32-value block is 16 bytes: byte i holds value i in its low
     nibble and value i+16 in its high nibble.
+    kind 2 = Q4 with 8-bit scales (--scale8): the same 4-bit data; the scale area holds one
+    float32 base for the tensor, then one byte per group: scale = base * 2^(code / 16). The
+    code is rounded up and the weights are quantized against the rounded scale.
   tensors, in the fixed order of it2.c (see TENSOR ORDER below)
   source vocabulary: SentencePiece BPE pieces sorted by bytes, each {offset, length, score, id}
     id = the piece's row in the source embedding; or, if --src-keep dropped that row,
@@ -15,8 +18,8 @@ Layout (little-endian; every section 64-byte aligned):
     merged into this one, recursively (SentencePiece's rule for a restricted vocabulary).
   target vocabulary: kept Hindi tokens in id order, each {offset, length}; then the strings
 
-Version 2 (this packer) adds SRC_SPLIT entries; a blob without --src-keep is otherwise the same as
-version 1.
+Version 2 adds SRC_SPLIT entries; a blob without --src-keep is otherwise the same as version 1.
+Version 3 (--scale8) has kind-2 tensors.
 """
 import argparse
 import json
@@ -28,7 +31,18 @@ from safetensors.numpy import load_file
 
 MAGIC, VERSION, GROUP = b"IT2B", 2, 64
 SRC_SPLIT = 0x80000000
-KIND_F32, KIND_Q4 = 0, 1
+KIND_F32, KIND_Q4, KIND_Q4S8 = 0, 1, 2
+SCALE_STEPS = 16  # kind 2: scale codes per octave
+
+
+def pow2_steps():
+    """2^(i/16) for i < 256 as float32, built the way it2.c builds its table (exact powers of two
+    times 16 float32 constants), so both sides use the same scales."""
+    frac = np.array([2.0 ** (k / SCALE_STEPS) for k in range(SCALE_STEPS)], np.float32)
+    return np.array([np.ldexp(frac[i % SCALE_STEPS], i // SCALE_STEPS) for i in range(256)], np.float32)
+
+
+POW2 = pow2_steps()
 
 
 def align(buf, n=64):
@@ -50,11 +64,30 @@ def q4(w):
     return packed.tobytes(), scale.reshape(rows, cols // GROUP).astype(np.float16).tobytes(), deq
 
 
+def q4_s8(w):
+    """4-bit like q4(), with 8-bit log scales. Returns (packed bytes, scale area bytes, dequant)."""
+    rows, cols = w.shape
+    g = w.reshape(rows, cols // GROUP, GROUP).astype(np.float32)
+    ideal = np.abs(g).max(axis=2) / 7.0
+    base = np.float32(max(float(ideal.max()), 1e-30) * 2.0 ** (-255.0 / SCALE_STEPS))
+    with np.errstate(divide="ignore"):
+        code = np.ceil(SCALE_STEPS * np.log2(np.maximum(ideal, 1e-38) / base) - 1e-6)
+    code = np.clip(code, 0, 255).astype(np.uint8)
+    scale = (base * POW2[code])[:, :, None]
+    q = np.clip(np.round(g / scale), -7, 7).astype(np.int8)
+    deq = (q.astype(np.float32) * scale).reshape(rows, cols)
+    blocks = q.reshape(rows, cols // 32, 2, 16)
+    lo, hi = blocks[:, :, 0, :], blocks[:, :, 1, :]
+    packed = ((lo.astype(np.uint8) & 0x0F) | ((hi.astype(np.uint8) & 0x0F) << 4)).reshape(rows, cols // 2)
+    return packed.tobytes(), struct.pack("<f", float(base)) + code.tobytes(), deq
+
+
 class Packer:
-    def __init__(self):
+    def __init__(self, scale8=False):
         self.data = bytearray()
         self.table = []
         self.deq = {}
+        self.scale8 = scale8
 
     def f32(self, name, a):
         a = np.ascontiguousarray(a, dtype=np.float32)
@@ -66,14 +99,14 @@ class Packer:
         self.deq[name] = a
 
     def q4(self, name, w):
-        packed, scales, deq = q4(w)
+        packed, scales, deq = (q4_s8 if self.scale8 else q4)(w)
         align(self.data)
         off = len(self.data)
         self.data.extend(packed)
         align(self.data)
         soff = len(self.data)
         self.data.extend(scales)
-        self.table.append((KIND_Q4, w.shape[0], w.shape[1], off, soff))
+        self.table.append((KIND_Q4S8 if self.scale8 else KIND_Q4, w.shape[0], w.shape[1], off, soff))
         self.deq[name] = deq
 
 
@@ -156,6 +189,7 @@ def main():
     ap.add_argument("--dec-layers", default="0,2,4,6,8,10,12,14,16,17")
     ap.add_argument("--src-keep", type=int, default=0,
                     help="keep only the N most frequent source embedding rows (0: all)")
+    ap.add_argument("--scale8", action="store_true", help="8-bit log scales instead of float16 (kind 2)")
     args = ap.parse_args()
     w = load_file(os.path.join(args.model_dir, "model.safetensors"))
     dec_layers = [int(x) for x in args.dec_layers.split(",")]
@@ -169,7 +203,7 @@ def main():
     src_rows, pieces, src_stats = source_vocab(args.model_dir, src_dict, args.src_keep)
     src_row_of = {orig: r for r, orig in enumerate(src_rows)}
 
-    p = Packer()
+    p = Packer(args.scale8)
     # TENSOR ORDER (it2.c relies on it)
     p.q4("src_emb", w["model.encoder.embed_tokens.weight"][src_rows])
     ln(p, w, "model.encoder.layernorm_embedding")
@@ -235,7 +269,7 @@ def main():
     for kind, rows, cols, off, soff in p.table:
         table.extend(struct.pack("<5I", kind, rows, cols, tensors_off + off, tensors_off + soff if kind else 0))
     out[header_size:header_size + table_size] = table
-    hdr = struct.pack("<4s21I", MAGIC, VERSION, 512, 8, 2048, n_enc, len(dec_layers), GROUP,
+    hdr = struct.pack("<4s21I", MAGIC, 3 if args.scale8 else VERSION, 512, 8, 2048, n_enc, len(dec_layers), GROUP,
                       len(src_rows), len(keep), len(p.table),
                       src_row_of[src_dict["eng_Latn"]], src_row_of[src_dict["hin_Deva"]], 0, 1, 2, 3,
                       len(pieces), src_off, src_str_off, tgt_off, tgt_str_off)
@@ -243,7 +277,7 @@ def main():
     struct.pack_into("<I", out, len(hdr), len(out))  # total size
     open(args.out, "wb").write(out)
     meta = dict(dec_layers=dec_layers, n_enc=n_enc, tgt_vocab=len(keep), src_pieces=len(pieces),
-                src_vocab=len(src_rows), bytes=len(out), tensors=len(p.table), kept_ids=keep,
+                src_vocab=len(src_rows), bytes=len(out), tensors=len(p.table), kept_ids=keep, scale8=args.scale8,
                 src_rows=src_rows)
     json.dump(meta, open(args.out + ".json", "w"))
     print("%s: %.1f MB, %d tensors, %d enc + %d dec layers, %d source pieces (%d split, %d left out), "

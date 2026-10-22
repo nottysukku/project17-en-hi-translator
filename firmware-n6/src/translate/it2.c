@@ -1,8 +1,9 @@
 /**
  * @file     it2.c
  * @brief    IndicTrans2 English-to-Hindi engine; implements it2.h.
- * @details  Numerics: weights are signed 4-bit in groups of 64 with a float16 scale per group
- *           (it2_pack.py). Before each linear layer the input row is quantised to int8 with one
+ * @details  Numerics: weights are signed 4-bit in groups of 64 with a scale per group (it2_pack.py):
+ *           float16 (tensor kind 1), or a byte code with scale = base * 2^(code / 16) (kind 2, one
+ *           float32 base per tensor; half the bytes, and the same rounding as the packer). Before each linear layer the input row is quantised to int8 with one
  *           scale per group of 64 (transformer activations have outliers; one scale per row cost
  *           6 chrF points), so a group's dot product is exact integer arithmetic; both scales are
  *           applied in float. Layer norms, attention, GELU and the residual stream are float32.
@@ -41,6 +42,11 @@
 /* Most Hindi words take 1-3 tokens; stop if one token repeats this often in a row. */
 #define IT2_MAX_REPEAT 6U
 
+/* Tensor kinds of the blob (it2_pack.py). */
+#define IT2_KIND_F32  0U
+#define IT2_KIND_Q4   1U
+#define IT2_KIND_Q4S8 2U
+
 /* Source piece whose embedding row was trimmed (it2_pack.py --src-keep): the low bits are the
    byte length of the left part of the BPE merge that built it. */
 #define IT2_SRC_SPLIT 0x80000000U
@@ -59,6 +65,7 @@ typedef struct
     float *self_k, *self_v;               /* [n_dec][IT2_MAX_TGT][D] */
     float *logits;                        /* [tgt_vocab] */
     float *gelu;                          /* [GELU_STEPS + 1] */
+    float *pow2;                          /* [256]: 2^(i / 16), kind-2 scale codes */
     uint32_t *src_ids;
 } it2_scratch_t;
 
@@ -90,6 +97,7 @@ size_t it2_workspace_size(const void *blob)
     n += 2U * align32((size_t)h->n_dec * IT2_MAX_TGT * D * sizeof(float));
     n += align32(h->tgt_vocab * sizeof(float));
     n += align32((GELU_STEPS + 1U) * sizeof(float));
+    n += align32(256U * sizeof(float));
     n += align32(IT2_MAX_SRC * sizeof(uint32_t));
     return n;
 }
@@ -151,17 +159,35 @@ static const uint16_t *tensor_scales(const it2_model_t *m, const it2_tensor_t *t
     return (const uint16_t *)(const void *)(m->blob + t->scale_off);
 }
 
+/** @brief Base of a kind-2 tensor's scales (first 4 bytes of its scale area). */
+static float s8_base(const it2_model_t *m, const it2_tensor_t *t)
+{
+    float b;
+    memcpy(&b, m->blob + t->scale_off, sizeof(b));
+    return b;
+}
+
+/** @brief Scale codes of a kind-2 tensor, one byte per row and group, after the base. */
+static const uint8_t *s8_codes(const it2_model_t *m, const it2_tensor_t *t)
+{
+    return m->blob + t->scale_off + sizeof(float);
+}
+
 /** @brief One Q4 row, dequantised to float (embedding lookups). */
 static void q4_row(const it2_model_t *m, const it2_tensor_t *t, uint32_t row, float scale, float *out)
 {
     const uint32_t cols = t->cols;
     const uint8_t *data = tensor_data(m, t) + (size_t)row * (cols / 2U);
-    const uint16_t *sc = tensor_scales(m, t) + (size_t)row * (cols / GROUP);
+    const int s8 = (t->kind == IT2_KIND_Q4S8);
+    const uint16_t *sc = s8 ? NULL : (tensor_scales(m, t) + (size_t)row * (cols / GROUP));
+    const uint8_t *code = s8 ? (s8_codes(m, t) + (size_t)row * (cols / GROUP)) : NULL;
+    const float *pow2 = scratch_of(m)->pow2;
+    const float base = s8 ? (s8_base(m, t) * scale) : scale;
     uint32_t g;
 
     for (g = 0; g < cols / GROUP; ++g)
     {
-        const float s = half_to_float(sc[g]) * scale;
+        const float s = s8 ? (pow2[code[g]] * base) : (half_to_float(sc[g]) * scale);
         uint32_t blk;
 
         for (blk = 0; blk < 2U; ++blk)
@@ -257,27 +283,58 @@ static void linear(const it2_model_t *m, const it2_linear_t *l, const float *x, 
     const uint32_t N = t->rows;
     const uint32_t groups = K / GROUP;
     const uint8_t *data = tensor_data(m, t);
-    const uint16_t *sc = tensor_scales(m, t);
     uint32_t n, r, g;
 
     quantize_rows(x, rows, K, s->xq, s->xs);
-    for (n = 0; n < N; ++n)
+    if (t->kind == IT2_KIND_Q4S8)
     {
-        const uint8_t *wrow = data + (size_t)n * (K / 2U);
-        const uint16_t *srow = sc + (size_t)n * groups;
-        const float bias = (l->b != NULL) ? l->b[n] : 0.0f;
+        /* 8-bit scale codes: the tensor's base multiplies each output once */
+        const uint8_t *codes = s8_codes(m, t);
+        const float base = s8_base(m, t);
 
-        for (r = 0; r < rows; ++r)
+        for (n = 0; n < N; ++n)
         {
-            const int8_t *xr = s->xq + (size_t)r * K;
-            const float *xsr = s->xs + (size_t)r * groups;
-            float acc = 0.0f;
+            const uint8_t *wrow = data + (size_t)n * (K / 2U);
+            const uint8_t *crow = codes + (size_t)n * groups;
+            const float bias = (l->b != NULL) ? l->b[n] : 0.0f;
 
-            for (g = 0; g < groups; ++g)
+            for (r = 0; r < rows; ++r)
             {
-                acc += (float)q4_group_dot(wrow + (g * 32U), xr + (g * GROUP)) * (half_to_float(srow[g]) * xsr[g]);
+                const int8_t *xr = s->xq + (size_t)r * K;
+                const float *xsr = s->xs + (size_t)r * groups;
+                float acc = 0.0f;
+
+                for (g = 0; g < groups; ++g)
+                {
+                    acc += (float)q4_group_dot(wrow + (g * 32U), xr + (g * GROUP)) * (s->pow2[crow[g]] * xsr[g]);
+                }
+                y[(size_t)r * N + n] = (acc * base) + bias;
             }
-            y[(size_t)r * N + n] = acc + bias;
+        }
+        return;
+    }
+    {
+        const uint16_t *sc = tensor_scales(m, t);
+
+        for (n = 0; n < N; ++n)
+        {
+            const uint8_t *wrow = data + (size_t)n * (K / 2U);
+            const uint16_t *srow = sc + (size_t)n * groups;
+            const float bias = (l->b != NULL) ? l->b[n] : 0.0f;
+
+            for (r = 0; r < rows; ++r)
+            {
+                const int8_t *xr = s->xq + (size_t)r * K;
+                const float *xsr = s->xs + (size_t)r * groups;
+                float acc = 0.0f;
+
+                for (g = 0; g < groups; ++g)
+                {
+                    acc += (float)q4_group_dot(wrow + (g * 32U), xr + (g * GROUP)) *
+                           (half_to_float(srow[g]) * xsr[g]);
+                }
+                y[(size_t)r * N + n] = acc + bias;
+            }
         }
     }
 }
@@ -880,7 +937,7 @@ int it2_open(it2_model_t *m, const void *blob, void *workspace)
     uint32_t i, k = 0;
 
     if ((m == NULL) || (blob == NULL) || (workspace == NULL) || (memcmp(h->magic, "IT2B", 4) != 0) ||
-        ((h->version != 1U) && (h->version != 2U)) || (h->d_model != D) || (h->n_heads != H) || (h->d_ffn != FFN) || (h->group != GROUP))
+        (h->version < 1U) || (h->version > 3U) || (h->d_model != D) || (h->n_heads != H) || (h->d_ffn != FFN) || (h->group != GROUP))
     {
         return -1;
     }
@@ -976,6 +1033,7 @@ int it2_open(it2_model_t *m, const void *blob, void *workspace)
     TAKE(s->self_v, float, (size_t)h->n_dec * IT2_MAX_TGT * D * sizeof(float));
     TAKE(s->logits, float, h->tgt_vocab * sizeof(float));
     TAKE(s->gelu, float, (GELU_STEPS + 1U) * sizeof(float));
+    TAKE(s->pow2, float, 256U * sizeof(float));
     TAKE(s->src_ids, uint32_t, IT2_MAX_SRC * sizeof(uint32_t));
 #undef TAKE
     for (i = 0; i <= GELU_STEPS; ++i)
@@ -983,7 +1041,34 @@ int it2_open(it2_model_t *m, const void *blob, void *workspace)
         const float x = -GELU_RANGE + ((2.0f * GELU_RANGE * (float)i) / (float)GELU_STEPS);
         s->gelu[i] = 0.5f * x * (1.0f + erff(x * 0.70710678f));
     }
+    {
+        /* 2^(k/16) as float32, the constants it2_pack.py uses; whole octaves are exact. */
+        static const float frac[16] = {1.0f,        1.04427373f, 1.09050775f, 1.13878858f,
+                                       1.18920708f, 1.24185777f, 1.29683959f, 1.35425556f,
+                                       1.41421354f, 1.47682619f, 1.54221082f, 1.61049032f,
+                                       1.68179286f, 1.75625217f, 1.8340081f,  1.91520655f};
+        for (i = 0; i < 256U; ++i)
+        {
+            s->pow2[i] = ldexpf(frac[i & 15U], (int)(i >> 4));
+        }
+    }
+    /* Every tensor must be of a kind this engine reads. */
+    for (i = 0; i < h->n_tensors; ++i)
+    {
+        if (t[i].kind > IT2_KIND_Q4S8)
+        {
+            return -3;
+        }
+    }
     return 0;
+}
+
+void it2_set_cancel(it2_model_t *m, it2_cancel_t cancel)
+{
+    if (m != NULL)
+    {
+        m->cancel = cancel;
+    }
 }
 
 int it2_translate(const it2_model_t *m, const char *english, char *hindi, size_t capacity, it2_stats_t *stats)
@@ -1007,6 +1092,10 @@ int it2_translate(const it2_model_t *m, const char *english, char *hindi, size_t
     t0 = it2_now_ms();
     encode(m, s->src_ids, n_src);
     t1 = it2_now_ms();
+    if ((m->cancel != NULL) && (m->cancel() != 0))
+    {
+        return IT2_CANCELLED;
+    }
     max_len = (2U * n_src) + 16U;
     if (max_len > IT2_MAX_TGT)
     {
@@ -1018,6 +1107,10 @@ int it2_translate(const it2_model_t *m, const char *english, char *hindi, size_t
         uint32_t v, best = m->hdr->eos;
         float best_v = -1e30f;
 
+        if ((m->cancel != NULL) && (m->cancel() != 0))
+        {
+            return IT2_CANCELLED;
+        }
         decode_step(m, tok, pos, n_src);
         for (v = 0; v < m->hdr->tgt_vocab; ++v)
         {

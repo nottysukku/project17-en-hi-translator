@@ -29,6 +29,9 @@ extern "C" {
 /** @brief Longest translation, in target tokens. */
 #define IT2_MAX_TGT 128U
 
+/** @brief it2_translate() result when the cancel check stopped it. */
+#define IT2_CANCELLED (-100)
+
 /** @brief Blob header, as written by it2_pack.py. */
 typedef struct
 {
@@ -70,9 +73,13 @@ typedef struct
     it2_linear_t q, k, v, o, cq, ck, cv, co, fc1, fc2;
 } it2_dec_layer_t;
 
+/** @brief Polled once per output token; non-zero stops the translation. */
+typedef int (*it2_cancel_t)(void);
+
 /** @brief A model opened in place over its blob. */
 typedef struct
 {
+    it2_cancel_t cancel; /* NULL: never; set with it2_set_cancel() after it2_open() */
     const uint8_t *blob;
     const it2_header_t *hdr;
     const it2_tensor_t *src_emb, *tgt_emb;
@@ -103,6 +110,9 @@ size_t it2_workspace_size(const void *blob);
  */
 int it2_open(it2_model_t *m, const void *blob, void *workspace);
 
+/** @brief Let it2_translate() stop early when @p cancel returns non-zero (NULL: never). */
+void it2_set_cancel(it2_model_t *m, it2_cancel_t cancel);
+
 /**
  * @brief Translate one English sentence to Hindi.
  * @param[in] m Opened model.
@@ -110,7 +120,7 @@ int it2_open(it2_model_t *m, const void *blob, void *workspace);
  * @param[out] hindi UTF-8 Hindi text, always NUL-terminated.
  * @param[in] capacity Bytes available at @p hindi.
  * @param[out] stats Optional timing; may be NULL.
- * @return Bytes written (without the NUL), or negative on error.
+ * @return Bytes written (without the NUL), negative on error, IT2_CANCELLED if cancelled.
  */
 int it2_translate(const it2_model_t *m, const char *english, char *hindi, size_t capacity, it2_stats_t *stats);
 
