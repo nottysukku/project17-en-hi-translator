@@ -1,0 +1,5 @@
+model-tools/out/
+model-tools/downloads/
+*.onnx
+*.npz
+__pycache__/
