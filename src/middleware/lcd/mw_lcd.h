@@ -162,6 +162,18 @@ void mw_lcd_fill_rect(int32_t x, int32_t y, int32_t width, int32_t height, uint1
 void mw_lcd_draw_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t thickness, uint16_t color);
 
 /**
+ * @brief Blend a 4-bit alpha bitmap (two pixels per byte, high nibble first, rows padded to whole
+ *        bytes) in one color into the hidden framebuffer, clipped to the screen.
+ * @param[in] x Left edge; may be negative.
+ * @param[in] y Top edge; may be negative.
+ * @param[in] width Bitmap width in pixels.
+ * @param[in] height Bitmap height in pixels.
+ * @param[in] bits Packed alpha rows.
+ * @param[in] color RGB565 color.
+ */
+void mw_lcd_draw_alpha4(int32_t x, int32_t y, uint32_t width, uint32_t height, const uint8_t *bits, uint16_t color);
+
+/**
  * @brief Get the line advance for the bundled 48-pixel font.
  * @param[in] scale Integer font scale.
  * @return Line height in pixels, or zero for scale zero.

@@ -1,0 +1,31 @@
+{
+ "checkpoint": "C:\\Users\\choprasu\\Downloads\\Reverse_engineering2\\Reverse_Engineering\\cynipsnet_re\\cynipsnet_punct.pt",
+ "int8_wer": {
+  "librispeech_pc_dev_clean_100": 7.420289855072464
+ },
+ "marks": {
+  "all": [
+   60.9,
+   30.2,
+   40.3
+  ],
+  ",": [
+   69.1,
+   54.0,
+   60.6
+  ],
+  ".": [
+   16.7,
+   3.0,
+   5.1
+  ],
+  "?": [
+   0.0,
+   0.0,
+   0.0
+  ]
+ },
+ "epochs": 260,
+ "output_scale": 0.5966952466589259,
+ "tokens": "_ ABCDEFGHIJKLMNOPQRSTUVWXYZ',.?"
+}

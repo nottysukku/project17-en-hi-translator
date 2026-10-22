@@ -480,6 +480,41 @@ void mw_lcd_fill_rect(int32_t x, int32_t y, int32_t width, int32_t height, uint1
     }
 }
 
+void mw_lcd_draw_alpha4(int32_t x, int32_t y, uint32_t width, uint32_t height, const uint8_t *bits, uint16_t color)
+{
+    const uint32_t row_bytes = (width + 1U) / 2U;
+    uint32_t r, c;
+
+    if ((active_config.draw_buffer == NULL) || (bits == NULL))
+    {
+        return;
+    }
+    for (r = 0; r < height; ++r)
+    {
+        const int32_t py = y + (int32_t)r;
+        const uint8_t *row = bits + (r * row_bytes);
+
+        if ((py < 0) || (py >= (int32_t)active_config.height))
+        {
+            continue;
+        }
+        for (c = 0; c < width; ++c)
+        {
+            const int32_t px = x + (int32_t)c;
+            const uint8_t packed = row[c / 2U];
+            const uint8_t a4 = ((c & 1U) == 0U) ? (uint8_t)(packed >> 4) : (uint8_t)(packed & 0x0FU);
+            uint16_t *pixel;
+
+            if ((a4 == 0U) || (px < 0) || (px >= (int32_t)active_config.width))
+            {
+                continue;
+            }
+            pixel = &active_config.draw_buffer[((uint32_t)py * active_config.stride_pixels) + (uint32_t)px];
+            *pixel = (a4 == 15U) ? color : lcd_blend_rgb565(*pixel, color, (uint8_t)(a4 * 17U));
+        }
+    }
+}
+
 void mw_lcd_draw_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t thickness, uint16_t color)
 {
     const float ax = (float)x0 + 0.5f;
