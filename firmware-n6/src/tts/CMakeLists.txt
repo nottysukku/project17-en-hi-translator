@@ -5,7 +5,7 @@
 # (stedgeai generate --name flow / --name vocoder, see HANDOFF.md); copy each st_out folder's
 # .c and .h files into networks/flow and networks/vocoder. Without them the firmware still builds
 # and translates, without speech.
-add_library(tts STATIC tts_front.c xl_voice_net.c)
+add_library(tts STATIC tts_front.c tts_numbers.c xl_voice_net.c)
 target_include_directories(tts PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(tts PRIVATE -O2 -Wextra)
 target_link_libraries(tts PRIVATE stedgeai)

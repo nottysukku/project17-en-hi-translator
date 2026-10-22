@@ -85,7 +85,7 @@ Not used, and why:
   board (`src/translate/it2.c`, about 2 to 4 s per sentence, to be measured) and the Hindi appears
   under the last two lines of English. The status bar says "Translating..." meanwhile.
 - **Speech.** If the N6 has the speaker, the Hindi is then spoken (`xl_speech.c`): "Speaking
-  Hindi..." in the status bar. Recognition pauses while it speaks, so it does not hear itself, and
+  Hindi..." in the status bar. Numbers in digits are read as Hindi words (`src/tts/tts_numbers.c`). Recognition pauses while it speaks, so it does not hear itself, and
   sentences said meanwhile are not recognized.
 - **Speaker.** AUTO mode (the default) gives the speaker to the music while it plays, and to the
   translator otherwise. TRANSLATE and MUSIC force one source. The USER button cycles through the
@@ -132,9 +132,10 @@ From this folder (gcc or clang):
 
 ```
 cc -I. xl_sentence.c test/sentence_host.c -o sentence_host && ./sentence_host
-cc -DXL_SPEECH_HOST_TEST -I. -I../../tts xl_speech.c xl_resample.c ../../tts/tts_front.c test/speech_host.c -lm -o speech_host
+cc -DXL_SPEECH_HOST_TEST -I. -I../../tts xl_speech.c xl_resample.c ../../tts/tts_front.c ../../tts/tts_numbers.c test/speech_host.c -lm -o speech_host
 ./speech_host ../../../../model-tools/out/tts/tts_front.bin
 cc -DXL_HINDI_TEXT_HOST_TEST -I. xl_hindi_text.c test/hindi_text_host.c -o hindi_text_host
+cc -I../../tts ../../tts/tts_numbers.c ../../tts/test/numbers_host.c -o numbers_host && ./numbers_host
 ```
 
 ## Not done yet

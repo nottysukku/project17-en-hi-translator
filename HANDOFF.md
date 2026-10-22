@@ -69,6 +69,9 @@ board shows and measures speed (section 7).
 - **`src/tts/tts_front.c`**: MMS-TTS front end (tokenizer, text encoder with relative attention, stochastic
   duration predictor with spline flows, durations, prior noise from a counter-based generator). Int8 text
   encoder with int8 activations (as it2), float16 duration predictor.
+- **`src/tts/tts_numbers.c`**: numbers in digits become Hindi words before speech (the voice's alphabet has
+  only 0-4 and 8, and the translator writes e.g. "25 साल"): Indian system (हज़ार, लाख, करोड़), decimals,
+  percent; more than 9 digits are read one by one.
 - **`src/tts/xl_voice_net.c`**: the flow and vocoder through ST's generated API (`stai_flow_*`,
   `stai_vocoder_*`). Static assertions check shapes and float32 I/O. CMake builds them in when the generated
   files are in `src/tts/networks/flow` and `src/tts/networks/vocoder`; otherwise text only.
@@ -188,12 +191,10 @@ If a step fails, send its last 30 lines; do not work around it.
 2. **Speed on the board:** from the log. Translation reads ~41 MB of weights per output token from NOR; if
    decoding is slow, stream weights with DMA or keep hot tensors in PSRAM. If the vocoder is slower than real
    time, raise `XL_SPEECH_LEAD_RUNS` or synthesize the whole sentence before playing.
-3. **Numbers in speech:** the voice's alphabet has only the digits 0-4 and 8; spell numbers as Hindi words before
-   `tts_front_text_to_ids` if the translator outputs digits.
-4. **Optional:** distil a shallower decoder for speed (Colab). With 10 of 18 layers and no fine-tuning chrF drops
+3. **Optional:** distil a shallower decoder for speed (Colab). With 10 of 18 layers and no fine-tuning chrF drops
    to 43.1.
-5. **True Stop mode** on the N6. Today the "sleep" is Sleep mode: WFI, NPU idle, LCD off.
-6. **WBA:** flash and test the music receiver.
+4. **True Stop mode** on the N6. Today the "sleep" is Sleep mode: WFI, NPU idle, LCD off.
+5. **WBA:** flash and test the music receiver.
 
 ## 8. What a cloud agent can and cannot do
 

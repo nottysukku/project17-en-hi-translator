@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "tts_front.h"
+#include "tts_numbers.h"
 #include "xl_audio_out.h"
 #include "xl_resample.h"
 #include "xl_voice_net.h"
@@ -52,9 +53,13 @@ static void log_none(const char *format, ...)
 /** @brief 48 kHz samples of the longest sentence, with the resampler's tail. */
 #define XL_SPEECH_PCM (((XL_SPEECH_MAX_FRAMES * XL_SPEECH_HOP) + XL_RESAMPLE_TAPS) * XL_SPEECH_UP)
 
+/** @brief The sentence with its numbers spelled out (numbers grow: 25 -> पच्चीस). */
+#define XL_SPEECH_TEXT 2048U
+
 typedef struct
 {
     tts_front_t front;
+    char text[XL_SPEECH_TEXT];
     uint16_t ids[TTS_MAX_IDS];
     xl_resample_t resampler;
     float *acoustic; /* [XL_SPEECH_MAX_FRAMES][192]: the flow's output, frame-major */
@@ -173,7 +178,8 @@ int xl_speech_say(const char *hindi, uint32_t seed, xl_speech_cancel_t cancel)
     {
         return -1;
     }
-    n = tts_front_text_to_ids(&sp.front, hindi, sp.ids, TTS_MAX_IDS);
+    (void)tts_spell_numbers(hindi, sp.text, sizeof(sp.text)); /* the voice knows few digits */
+    n = tts_front_text_to_ids(&sp.front, sp.text, sp.ids, TTS_MAX_IDS);
     if (n == 0U)
     {
         return 0; /* nothing the voice can say */
