@@ -9,16 +9,16 @@
 #define APPLICATION_TRANSLATOR_XL_MODELS_H
 
 /** @brief Voice front end weights for the CPU (tts_front_pack.py) */
-#define XL_MODEL_TTS_FRONT_ADDR 0x72390000U
+#define XL_MODEL_TTS_FRONT_ADDR 0x70500000U
 #define XL_MODEL_TTS_FRONT_SLOT 0x00770000U
 
-/** @brief Devanagari syllable font, 40 px, run-length coded (hi_font_rle.py) */
-#define XL_MODEL_FONT_ADDR 0x72B00000U
-#define XL_MODEL_FONT_SLOT 0x002B0000U
-
 /** @brief English-to-Hindi translation model (it2_pack.py) */
-#define XL_MODEL_TRANSLATION_ADDR 0x72DB0000U
-#define XL_MODEL_TRANSLATION_SLOT 0x05250000U
+#define XL_MODEL_TRANSLATION_ADDR 0x71C10000U
+#define XL_MODEL_TRANSLATION_SLOT 0x05160000U
+
+/** @brief Devanagari syllable font, 40 px, run-length coded (hi_font_rle.py) */
+#define XL_MODEL_FONT_ADDR 0x76D70000U
+#define XL_MODEL_FONT_SLOT 0x002B0000U
 
 /** @brief Shared, in turn: the translation workspace, or the voice (the two regions below) */
 #define XL_PSRAM_WORK_ADDR 0x90610000U

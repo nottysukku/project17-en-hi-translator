@@ -80,11 +80,22 @@ Not used, and why:
 
 ## Behavior
 
+- **Translation.** The recognized English is cut into sentences (`xl_sentence.c`): at a `.`, `?` or
+  `!`, after 1.2 s with no new words, or at 200 characters. Each sentence is translated on the
+  board (`src/translate/it2.c`, about 2 to 4 s per sentence, to be measured) and the Hindi appears
+  under the last two lines of English. The status bar says "Translating..." meanwhile.
+- **Speech.** If the N6 has the speaker, the Hindi is then spoken (`xl_speech.c`): "Speaking
+  Hindi..." in the status bar. Recognition pauses while it speaks, so it does not hear itself, and
+  sentences said meanwhile are not recognized.
 - **Speaker.** AUTO mode (the default) gives the speaker to the music while it plays, and to the
   translator otherwise. TRANSLATE and MUSIC force one source. The USER button cycles through the
   three modes.
+- **Music always wins.** When music takes the speaker, speech stops at once (the speaker stream is
+  flushed and stopped), a translation in progress is cancelled within one word, and the queued
+  sentences and the half-heard one are dropped.
 - **Sleep.** While the music has the speaker, the N6 sleeps:
   - recognition is paused, so the NPU is idle;
+  - the translator thread waits, idle;
   - the speaker stream is stopped;
   - the screen and backlight go off 5 s later;
   - the CPU waits in WFI.
@@ -93,16 +104,40 @@ Not used, and why:
   line), or on TRANSLATE, the N6 wakes and beeps twice.
 - **TONE** plays 880 Hz on the speaker, to check the wiring.
 
+## Models and memory
+
+`models.json` is the memory map: every model's slot in the 128 MB NOR flash and the PSRAM
+regions. `tools/models_layout.py` checks it and writes `xl_models.h`; `tools/flash.py n6 --models`
+programs the blobs. Without a blob the firmware still runs: no translation model, a message on the
+screen; no font, a message; no voice networks or front-end weights, text only. The log on the
+ST-LINK serial port (115200 baud) says which.
+
+| Blob | Made by | Runs on |
+|---|---|---|
+| Translation (IndicTrans2, 4-bit) | `model-tools/it2_pack.py` | CPU |
+| Hindi font | `model-tools/assets/hi_font_40.bin` | CPU |
+| Voice front end (MMS-TTS text encoder, durations) | `model-tools/tts_front_pack.py` | CPU |
+| Voice flow, vocoder | ST Edge AI from `tts_eval.py` / `tts_export.py` graphs | NPU |
+| Speech recognition | `src/asr_engine/models/cynipsnet_punct1` | NPU |
+
 ## Test without the WBA
 
 Connect a jumper from DK D2 (CN11-3) to +3.3 V (CN8-4). The router sees music playing, gives the
 speaker to side A and puts the N6 to sleep. Remove the jumper: about 1.5 s later the N6 wakes and
-beeps.
+beeps. With the jumper in while the N6 speaks, the speech must stop at once.
+
+## PC tests
+
+From this folder (gcc or clang):
+
+```
+cc -I. xl_sentence.c test/sentence_host.c -o sentence_host && ./sentence_host
+cc -DXL_SPEECH_HOST_TEST -I. -I../../tts xl_speech.c xl_resample.c ../../tts/tts_front.c test/speech_host.c -lm -o speech_host
+./speech_host ../../../../model-tools/out/tts/tts_front.bin
+cc -DXL_HINDI_TEXT_HOST_TEST -I. xl_hindi_text.c test/hindi_text_host.c -o hindi_text_host
+```
 
 ## Not done yet
 
-- Translation model and Devanagari text.
-- Neural Hindi voice.
+- Measured speed on the board (translation, voice), and the first test with the wiring.
 - True Stop mode: the microphone driver cannot restart, so "sleep" is currently idle plus WFI.
-- WBA firmware: port BLE_Audio_TMAP_Peripheral from STM32WBA55G-DK1 to the Nucleo, using the same
-  SAI1 pins.
