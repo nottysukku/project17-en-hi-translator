@@ -103,8 +103,9 @@ Details in its README.
 | Source vocabulary 24k / 20k / 16k / 12k rows (not used) | 90.7-87.5 MB | 49.3 / 48.9 / 48.5 / 47.9 |
 
 On the old 120-sentence set the used model scores 47.9, the same as the full model on this PC (the owner's PC
-measured 47.7 for the full model). The C tokeniser matches SentencePiece on 133 of 136 test sentences; the 3
-differences are abbreviations ("Dr.") and a final period.
+measured 47.7 for the full model). The C tokeniser matches the Python one on all 136 test sentences (it now
+keeps Moses' non-breaking prefixes, "Mr." "Dr." "Rs."), and on 18159 of 18855 IITB training sentences; the rest
+have quotes, brackets, "...", "%" or currency, which the recognizer does not write.
 
 **Voice:**
 - Front end precision (Whisper-small CER, 12 sentences, float back end): float 16.5%, int8 17.9%, 4-bit 22.2%.
@@ -187,14 +188,12 @@ If a step fails, send its last 30 lines; do not work around it.
 2. **Speed on the board:** from the log. Translation reads ~41 MB of weights per output token from NOR; if
    decoding is slow, stream weights with DMA or keep hot tensors in PSRAM. If the vocoder is slower than real
    time, raise `XL_SPEECH_LEAD_RUNS` or synthesize the whole sentence before playing.
-3. **Moses non-breaking prefixes** in `it2.c`'s tokeniser ("Mr.", "Dr.", single letters): the last tokeniser
-   differences, and the recognizer's sentence case turns "MR." into "Mr.".
-4. **Numbers in speech:** the voice's alphabet has only the digits 0-4 and 8; spell numbers as Hindi words before
+3. **Numbers in speech:** the voice's alphabet has only the digits 0-4 and 8; spell numbers as Hindi words before
    `tts_front_text_to_ids` if the translator outputs digits.
-5. **Optional:** distil a shallower decoder for speed (Colab). With 10 of 18 layers and no fine-tuning chrF drops
+4. **Optional:** distil a shallower decoder for speed (Colab). With 10 of 18 layers and no fine-tuning chrF drops
    to 43.1.
-6. **True Stop mode** on the N6. Today the "sleep" is Sleep mode: WFI, NPU idle, LCD off.
-7. **WBA:** flash and test the music receiver.
+5. **True Stop mode** on the N6. Today the "sleep" is Sleep mode: WFI, NPU idle, LCD off.
+6. **WBA:** flash and test the music receiver.
 
 ## 8. What a cloud agent can and cannot do
 

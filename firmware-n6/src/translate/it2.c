@@ -587,6 +587,101 @@ static int is_alnum(unsigned char c)
     return is_alpha(c) || ((c >= '0') && (c <= '9'));
 }
 
+/* Moses' English non-breaking prefixes (sacremoses nonbreaking_prefix.en): a period after one of
+   these stays with the word. The last three only before a number. */
+static const char *const nonbreaking[] = {
+    "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U",
+    "V", "W", "X", "Y", "Z", "v", "DR", "Dr", "Hr", "Lt", "MM", "MR", "MS", "Mr", "Ms", "Nr", "Op", "Ph", "Rs",
+    "Rt", "Sr", "St", "vs", "Adj", "Adm", "Adv", "Apr", "Aug", "Col", "Con", "Cpl", "Dec", "Drs", "Ens", "Feb",
+    "Gen", "Gov", "Hon", "Jan", "Jul", "Jun", "MRS", "Maj", "Mar", "Mme", "Mrs", "Nos", "Nov", "Oct", "Ord",
+    "Pfc", "Pvt", "Rep", "Res", "Rev", "Sen", "Sep", "Sfc", "Sgt", "e.g", "i.e", "rev", "Asst", "Bart", "Bldg",
+    "Brig", "Bros", "Capt", "Cmdr", "Corp", "Hosp", "Insp", "Mlle", "Msgr", "Prof", "Reps", "Sens", "Supt",
+    "Surg", "Comdr", "Messrs"};
+static const char *const numeric_only[] = {"Art", "No", "pp"};
+
+static int in_list(const char *const *list, uint32_t count, const char *word, uint32_t len)
+{
+    uint32_t i;
+
+    for (i = 0; i < count; ++i)
+    {
+        if ((strlen(list[i]) == len) && (memcmp(list[i], word, len) == 0))
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * @brief Moses' rule for a word that ends in a period (handles_nonbreaking_prefixes): the period
+ *        stays if the word before it has a period and a letter (U.S.), is a non-breaking prefix
+ *        (Mr, Dr, a single capital), or the next word starts in lower case, or the word is a
+ *        numeric-only prefix (No) before a number; otherwise it becomes its own token.
+ */
+static uint32_t split_periods(char *text, uint32_t cap)
+{
+    char tmp[512];
+    uint32_t i = 0, o = 0;
+
+    while ((text[i] != '\0') && ((o + 3U) < sizeof(tmp)))
+    {
+        uint32_t start = i, end, k;
+
+        while ((text[i] != '\0') && (text[i] != ' '))
+        {
+            i++;
+        }
+        end = i; /* token [start, end) */
+        if (((end - start) >= 2U) && (text[end - 1U] == '.'))
+        {
+            const char *pre = &text[start];
+            const uint32_t plen = end - start - 1U;
+            const char *next = (text[end] == ' ') ? &text[end + 1U] : NULL;
+            int has_dot = 0, has_alpha = 0, keep;
+
+            for (k = 0; k < plen; ++k)
+            {
+                has_dot |= (pre[k] == '.');
+                has_alpha |= is_alpha((unsigned char)pre[k]);
+            }
+            keep = (has_dot && has_alpha) ||
+                   in_list(nonbreaking, (uint32_t)(sizeof(nonbreaking) / sizeof(nonbreaking[0])), pre, plen) ||
+                   ((next != NULL) && (next[0] >= 'a') && (next[0] <= 'z')) ||
+                   (in_list(numeric_only, (uint32_t)(sizeof(numeric_only) / sizeof(numeric_only[0])), pre, plen) &&
+                    (next != NULL) && (next[0] >= '0') && (next[0] <= '9'));
+            for (k = start; (k < (end - 1U)) && ((o + 3U) < sizeof(tmp)); ++k)
+            {
+                tmp[o++] = text[k];
+            }
+            if (!keep)
+            {
+                tmp[o++] = ' ';
+            }
+            tmp[o++] = '.';
+        }
+        else
+        {
+            for (k = start; (k < end) && ((o + 1U) < sizeof(tmp)); ++k)
+            {
+                tmp[o++] = text[k];
+            }
+        }
+        if (text[i] == ' ')
+        {
+            tmp[o++] = ' ';
+            i++;
+        }
+    }
+    if (o >= cap)
+    {
+        o = cap - 1U;
+    }
+    (void)memcpy(text, tmp, o);
+    text[o] = '\0';
+    return o;
+}
+
 /**
  * @brief Moses-style English tokenisation for ASR text: punctuation becomes its own token, and an
  *        apostrophe between letters starts the next token ("don't" -> "don 't").
@@ -656,19 +751,8 @@ static uint32_t moses_tokenize(const char *in, char *out, uint32_t cap)
         }
         if (c == '.')
         {
-            /* a period between digits or letters stays (3.5, e.g.); otherwise it is a token */
-            const int prev_an = (p > (const unsigned char *)in) && is_alnum(p[-1]);
-            const int next_an = is_alnum(p[1]);
-            if (prev_an && next_an)
-            {
-                EMIT('.');
-            }
-            else
-            {
-                SPACE();
-                EMIT('.');
-                EMIT(' ');
-            }
+            /* kept with its word here; split_periods() decides, as Moses does */
+            EMIT('.');
             continue;
         }
         EMIT(c);
@@ -680,7 +764,7 @@ static uint32_t moses_tokenize(const char *in, char *out, uint32_t cap)
     out[n] = '\0';
 #undef EMIT
 #undef SPACE
-    return n;
+    return split_periods(out, cap);
 }
 
 /** @brief Binary search of a byte string among the sorted source pieces; -1 if absent. */
