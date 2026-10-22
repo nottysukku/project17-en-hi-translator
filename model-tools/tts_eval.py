@@ -127,9 +127,25 @@ def cer(ref, hyp):
     return d[len(b)] / max(1, len(a))
 
 
-def logmel(x):
-    import librosa  # noqa: F401
-    return None
+def logmel(x, sr=16000, n_fft=1024, hop=256, n_mels=80):
+    """Log-mel spectrogram [frames, n_mels] (natural log, floor 1e-5), numpy only."""
+    from scipy.signal import stft
+    _, _, z = stft(x, sr, nperseg=n_fft, noverlap=n_fft - hop, boundary=None, padded=False)
+    power = np.abs(z) ** 2
+    hz = np.linspace(0, sr / 2, power.shape[0])
+    mel = lambda f: 2595 * np.log10(1 + f / 700)  # noqa: E731
+    edges = np.linspace(mel(0), mel(sr / 2), n_mels + 2)
+    m = mel(hz)
+    fb = np.maximum(0, np.minimum((m[None] - edges[:-2, None]) / (edges[1:-1, None] - edges[:-2, None]),
+                                  (edges[2:, None] - m[None]) / (edges[2:, None] - edges[1:-1, None])))
+    return np.log(np.maximum(fb @ power, 1e-5)).T
+
+
+def mel_distance(a, b):
+    """Mean absolute log-mel difference in dB between two signals of (about) the same length."""
+    n = min(len(a), len(b))
+    la, lb = logmel(a[:n]), logmel(b[:n])
+    return float(np.mean(np.abs(la - lb)) * 10 / np.log(10))
 
 
 def main():
@@ -153,7 +169,7 @@ def main():
         return proc.batch_decode(ids, skip_special_tokens=True)[0].strip()
 
     tot = {"float": [], "npu": []}
-    snr = []
+    snr, mels = [], []
     for i, s in enumerate(SENTS):
         z, t = front(s, i)
         a = back_float(z, t)
@@ -162,13 +178,14 @@ def main():
         sf.write(os.path.join(OUT, "eval_%02d_npu.wav" % i), b, 16000)
         n = min(len(a), len(b))
         snr.append(10 * np.log10(np.sum(a[:n] ** 2) / max(np.sum((a[:n] - b[:n]) ** 2), 1e-12)))
+        mels.append(mel_distance(a, b))
         ha, hb = transcribe(a), transcribe(b)
         tot["float"].append(cer(s, ha))
         tot["npu"].append(cer(s, hb))
-        print("%-55s float CER %3.0f%% | npu CER %3.0f%% | SNR %5.1f dB\n   float: %s\n   npu  : %s" %
-              (s, 100 * tot["float"][-1], 100 * tot["npu"][-1], snr[-1], ha, hb), flush=True)
-    print("MEAN CER: float %.1f%%, npu %.1f%%; median waveform SNR %.1f dB" %
-          (100 * np.mean(tot["float"]), 100 * np.mean(tot["npu"]), np.median(snr)))
+        print("%-55s float CER %3.0f%% | npu CER %3.0f%% | SNR %5.1f dB | log-mel %4.2f dB\n   float: %s\n   npu  : %s" %
+              (s, 100 * tot["float"][-1], 100 * tot["npu"][-1], snr[-1], mels[-1], ha, hb), flush=True)
+    print("MEAN CER: float %.1f%%, npu %.1f%%; median waveform SNR %.1f dB; mean log-mel distance %.2f dB" %
+          (100 * np.mean(tot["float"]), 100 * np.mean(tot["npu"]), np.median(snr), np.mean(mels)))
 
 
 if __name__ == "__main__":
