@@ -62,14 +62,15 @@ typedef struct
     uint32_t *src_ids;
 } it2_scratch_t;
 
-static it2_scratch_t *scratch_of(const it2_model_t *m)
-{
-    return (it2_scratch_t *)(void *)(m->dec + m->hdr->n_dec);
-}
-
 static size_t align32(size_t n)
 {
     return (n + 31U) & ~(size_t)31U;
+}
+
+/** @brief The scratch follows the decoder layer table, rounded up to 32 bytes as in it2_open(). */
+static it2_scratch_t *scratch_of(const it2_model_t *m)
+{
+    return (it2_scratch_t *)(void *)((uint8_t *)m->dec + align32(m->hdr->n_dec * sizeof(it2_dec_layer_t)));
 }
 
 size_t it2_workspace_size(const void *blob)
