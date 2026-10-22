@@ -48,16 +48,19 @@ ENTRY(Reset_Handler)
  *   PSRAM          0x90000000   0x90500000     5 MB  LCD framebuffers,
  *                                                    .psram_bss
  *
- * The rest of the memory belongs to the NPU. The application links nothing
- * there, so it is not in the MEMORY table; the regions above end where it
- * begins:
+ * The rest of the memory belongs to the NPU and the models. The application
+ * links nothing there, so it is not in the MEMORY table; the regions above
+ * end where it begins:
  *
  *   0x70500000   0x78000000   123 MB  model blobs and network weights, in
  *                                     the NOR (translator/models.json; the
  *                                     recognizer's weights at 0x71500000)
  *   0x34064000   0x343C0000  3440 KB  NPU activations
  *   0x343C0000   0x34400000   256 KB  the NPU cache itself: never data
- *   0x90500000   0x92000000    27 MB  NPU activations, in the PSRAM
+ *   0x90500000   0x92000000    27 MB  NPU activations, in the PSRAM; in
+ *                                     translator mode the recognizer keeps
+ *                                     the first 1 MB and the translator
+ *                                     uses the rest by address (models.json)
  *
  * These are the memory pools the network was compiled with (the "offset="
  * comments at the top of src/asr_engine/models/<network>/network.c).
