@@ -33,6 +33,9 @@
 #include "log_module.h"
 #include "app_ble.h"
 #include "simple_nvm_arbiter.h"
+#ifdef BOARD_NUCLEO_MAX98357A
+#include "music_link.h"
+#endif /* BOARD_NUCLEO_MAX98357A */
 /* Private includes ----------------------------------------------------------*/
 
 /* Private typedef -----------------------------------------------------------*/
@@ -709,7 +712,11 @@ uint8_t TMAPAPP_StartAdvertising(CAP_Announcement_t AnnouncementType
 
   uint8_t Adv_Data[ADV_LEN] = {(ADV_AD_FLAGS_LEN-1), AD_TYPE_FLAGS, (FLAG_BIT_LE_GENERAL_DISCOVERABLE_MODE|FLAG_BIT_BR_EDR_NOT_SUPPORTED),
                                (ADV_LOCAL_NAME_LEN-1), AD_TYPE_COMPLETE_LOCAL_NAME,
+#ifdef BOARD_NUCLEO_MAX98357A
+                                 'N','6','_', 'M', 'u', 's','i','c', '_', '0', '0', '0', '0'};
+#else
                                  'S','T','M', '3', '2', 'W','B','A', '_', '0', '0', '0', '0'};
+#endif /* BOARD_NUCLEO_MAX98357A */
 #if (CFG_TEST_VALIDATION == 1u)
   Adv_Data[5] = 'T';
   Adv_Data[6] = 'M';
@@ -1196,6 +1203,11 @@ void CODEC_NotifyDataReady(uint16_t conn_handle, void* decoded_data, uint8_t cha
     Nb_Active_Ch = 2;
   }
   pPrevData = pData;
+
+#ifdef BOARD_NUCLEO_MAX98357A
+  /* Software volume (the MAX98357A has none) and the "music playing" line to the N6. */
+  MUSIC_LINK_ProcessChannel((int16_t *)pData, Sink_frame_size / 4U);
+#endif /* BOARD_NUCLEO_MAX98357A */
 
   if (Nb_Active_Ch < 2)
   {

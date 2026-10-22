@@ -252,7 +252,11 @@
 #define CFG_LPM_LEVEL               (1U)
 
 #define CFG_LPM_STOP1_SUPPORTED     (1U)
+#ifdef BOARD_NUCLEO_MAX98357A
+#define CFG_LPM_STANDBY_SUPPORTED   (0U)  /* Standby resets GPIOs: the music line on PB0 must keep driving */
+#else
 #define CFG_LPM_STANDBY_SUPPORTED   (1U)
+#endif /* BOARD_NUCLEO_MAX98357A */
 
 /**
  * Defines to use dynamic low power wakeup time profilling.
@@ -307,7 +311,11 @@ typedef enum
  * Enable or disable LOG over UART in the application.
  * Low power level(CFG_LPM_LEVEL) above 1 will disable LOG.
  */
+#ifdef BOARD_NUCLEO_MAX98357A
+#define CFG_LOG_SUPPORTED           (1U)  /* USART1 TX on PB12: the ST-LINK virtual COM port */
+#else
 #define CFG_LOG_SUPPORTED           (0U)
+#endif /* BOARD_NUCLEO_MAX98357A */
 
 extern UART_HandleTypeDef           huart1;
 #define LOG_UART_HANDLER            huart1
@@ -526,7 +534,12 @@ typedef enum
 
 /* USER CODE BEGIN Defines */
 #define CFG_BSP_ON_SEQUENCER                    (1)
+#ifdef BOARD_NUCLEO_MAX98357A
+/* NUCLEO-WBA55CG: no Discovery BSP (joystick, screen, codec). The Nucleo BSP is left out too:
+   its buttons B2 and B3 sit on PB6 and PB7, which carry SAI1 to the MAX98357A. */
+#else
 #define CFG_BSP_ON_DISCOVERY                    (1)
+#endif /* BOARD_NUCLEO_MAX98357A */
 
 /**
  * User interaction
@@ -534,9 +547,15 @@ typedef enum
  * When CFG_JOYSTICK_SUPPORTED is set, the joystick is activated if requested
  */
 
+#ifdef BOARD_NUCLEO_MAX98357A
+#define CFG_LED_SUPPORTED                       (0)
+#define CFG_JOYSTICK_SUPPORTED                  (0)
+#define CFG_LCD_SUPPORTED                       (0)
+#else
 #define CFG_LED_SUPPORTED                       (0) /* may be not compatible with LCD, check PCB revision */
 #define CFG_JOYSTICK_SUPPORTED                  (1)
 #define CFG_LCD_SUPPORTED                       (1)
+#endif /* BOARD_NUCLEO_MAX98357A */
 
 /**
  *  Joystick Use configuration

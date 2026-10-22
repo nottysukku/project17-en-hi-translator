@@ -37,9 +37,16 @@ extern "C" {
 
 /* Exported constants --------------------------------------------------------*/
 /*Audio Profiles Roles configuration*/
+#ifdef BOARD_NUCLEO_MAX98357A
+/* Music receiver only: the Nucleo has a speaker and no microphone. */
+#define APP_TMAP_ROLE                                   (TMAP_ROLE_UNICAST_MEDIA_RECEIVER | TMAP_ROLE_BROADCAST_MEDIA_RECEIVER)
+#define APP_CAP_ROLE                                    (CAP_ROLE_ACCEPTOR)
+#define APP_AUDIO_ROLE                                  (AUDIO_ROLE_SINK)
+#else
 #define APP_TMAP_ROLE                                   (TMAP_ROLE_CALL_TERMINAL | TMAP_ROLE_UNICAST_MEDIA_RECEIVER | TMAP_ROLE_BROADCAST_MEDIA_RECEIVER)
 #define APP_CAP_ROLE                                    (CAP_ROLE_ACCEPTOR)
 #define APP_AUDIO_ROLE                                  (AUDIO_ROLE_SOURCE | AUDIO_ROLE_SINK)
+#endif /* BOARD_NUCLEO_MAX98357A */
 
 #if ((APP_TMAP_ROLE & TMAP_ROLE_UNICAST_MEDIA_RECEIVER) == TMAP_ROLE_UNICAST_MEDIA_RECEIVER)
 #if ((APP_AUDIO_ROLE & AUDIO_ROLE_SINK) == 0u)

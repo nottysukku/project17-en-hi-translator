@@ -34,6 +34,9 @@
 #include "stm32_rtos.h"
 #include "otp.h"
 #include "stm32_timer.h"
+#ifdef BOARD_NUCLEO_MAX98357A
+#include "music_link.h"
+#endif /* BOARD_NUCLEO_MAX98357A */
 #include "stm_list.h"
 #include "advanced_memory_manager.h"
 #include "blestack.h"
@@ -204,7 +207,11 @@ static uint8_t a_BLE_CfgIrValue[16];
 static uint8_t a_BLE_CfgErValue[16];
 static BleApplicationContext_t bleAppContext;
 
+#ifdef BOARD_NUCLEO_MAX98357A
+static char a_GapDeviceName[] = {  'N', '6', '_', 'M', 'u', 's', 'i', 'c', '_', '0', '0', '0', '0' }; /* Gap Device Name */
+#else
 static char a_GapDeviceName[] = {  'S', 'T', 'M', '3', '2', 'W', 'B', 'A', '_', '0', '0', '0', '0' }; /* Gap Device Name */
+#endif /* BOARD_NUCLEO_MAX98357A */
 
 static AMM_VirtualMemoryCallbackFunction_t BLE_EVENTS_ResumeFlowProcessCb;
 
@@ -316,12 +323,16 @@ void APP_BLE_Init(void)
   /* Initialize the Audio Stack */
   APP_AUDIO_STACK_Init();
 
+#ifdef BOARD_NUCLEO_MAX98357A
+  MUSIC_LINK_Init();
+#endif /* BOARD_NUCLEO_MAX98357A */
+
 #if (CFG_LCD_SUPPORTED == 1)
   Menu_Config();
 #else
   TMAPAPP_Init(0);
-  uint8_t status = TMAPAPP_StartAdvertising(CAP_GENERAL_ANNOUNCEMENT, 0, GAP_APPEARANCE_HEADPHONES);
-  LOG_INFO_APP("TMAPAPP_StartAdvertising() returns status 0x%02X\n",status);
+  uint8_t adv_status = TMAPAPP_StartAdvertising(CAP_GENERAL_ANNOUNCEMENT, 0, GAP_APPEARANCE_HEADPHONES);
+  LOG_INFO_APP("TMAPAPP_StartAdvertising() returns status 0x%02X\n", adv_status);
 #endif /* (CFG_LCD_SUPPORTED == 1) */
 
   /* USER CODE END APP_BLE_Init_2 */
