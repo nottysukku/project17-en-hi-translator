@@ -41,6 +41,10 @@
 /* Most Hindi words take 1-3 tokens; stop if one token repeats this often in a row. */
 #define IT2_MAX_REPEAT 6U
 
+/* Source piece whose embedding row was trimmed (it2_pack.py --src-keep): the low bits are the
+   byte length of the left part of the BPE merge that built it. */
+#define IT2_SRC_SPLIT 0x80000000U
+
 /* ------------------------------------------------------------------------------------------ */
 /*                                        Workspace                                           */
 /* ------------------------------------------------------------------------------------------ */
@@ -662,6 +666,51 @@ static uint32_t utf8_len(uint8_t c)
 
 #define IT2_MAX_WORD 96U
 
+/**
+ * @brief Append the id of one BPE piece. A piece whose embedding was trimmed is replaced by the
+ *        two pieces it was merged from, recursively; this is SentencePiece's rule for a
+ *        restricted vocabulary (set_vocabulary), so the result matches it.
+ */
+static uint32_t emit_piece(const it2_model_t *m, const uint8_t *str, uint32_t len, uint32_t *ids, uint32_t max)
+{
+    const it2_src_piece_t *pieces = (const it2_src_piece_t *)(const void *)(m->blob + m->hdr->src_off);
+    uint16_t off[IT2_MAX_WORD], n[IT2_MAX_WORD];
+    uint32_t top = 0, out = 0;
+
+    off[top] = 0;
+    n[top++] = (uint16_t)len;
+    while ((top > 0U) && (out < max))
+    {
+        const uint32_t o = off[--top], l = n[top];
+        const int32_t p = find_piece(m, str + o, l);
+        uint32_t id, split;
+
+        if (p < 0)
+        {
+            ids[out++] = m->hdr->unk;
+            continue;
+        }
+        id = pieces[p].id;
+        split = id & ~IT2_SRC_SPLIT;
+        if ((id & IT2_SRC_SPLIT) == 0U)
+        {
+            ids[out++] = id;
+        }
+        else if ((split == 0U) || (split >= l) || ((top + 2U) > IT2_MAX_WORD))
+        {
+            ids[out++] = m->hdr->unk; /* not a valid split: cannot happen with it2_pack.py */
+        }
+        else
+        {
+            off[top] = (uint16_t)(o + split); /* right part, emitted after the left part */
+            n[top++] = (uint16_t)(l - split);
+            off[top] = (uint16_t)o;
+            n[top++] = (uint16_t)split;
+        }
+    }
+    return out;
+}
+
 /** @brief SentencePiece BPE on one word (already prefixed with U+2581): append its ids. */
 static uint32_t bpe_word(const it2_model_t *m, const uint8_t *w, uint32_t wlen, uint32_t *ids, uint32_t max)
 {
@@ -703,8 +752,7 @@ static uint32_t bpe_word(const it2_model_t *m, const uint8_t *w, uint32_t wlen, 
     }
     for (i = 0; (i < n) && (out < max); ++i)
     {
-        const int32_t p = find_piece(m, w + start[i], len[i]);
-        ids[out++] = (p >= 0) ? pieces[p].id : m->hdr->unk;
+        out += emit_piece(m, w + start[i], len[i], ids + out, max - out);
     }
     return out;
 }
@@ -831,7 +879,7 @@ int it2_open(it2_model_t *m, const void *blob, void *workspace)
     uint32_t i, k = 0;
 
     if ((m == NULL) || (blob == NULL) || (workspace == NULL) || (memcmp(h->magic, "IT2B", 4) != 0) ||
-        (h->version != 1U) || (h->d_model != D) || (h->n_heads != H) || (h->d_ffn != FFN) || (h->group != GROUP))
+        ((h->version != 1U) && (h->version != 2U)) || (h->d_model != D) || (h->n_heads != H) || (h->d_ffn != FFN) || (h->group != GROUP))
     {
         return -1;
     }

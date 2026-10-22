@@ -34,6 +34,20 @@ def sinusoids(n, dim=D, pad=PAD):
 POS = sinusoids(512)
 
 
+def restricted_spm(model_file, keep):
+    """SentencePiece model in which every normal piece for which keep(piece) is false is UNUSED.
+    Its BPE then splits such pieces back into the pieces they were merged from (what the removed
+    SetVocabulary() did), like it2.c with a --src-keep blob."""
+    import sentencepiece as spm
+    from sentencepiece import sentencepiece_model_pb2 as pb
+    proto = pb.ModelProto()
+    proto.ParseFromString(open(model_file, "rb").read())
+    for piece in proto.pieces:
+        if piece.type == 1 and len(piece.piece) > 1 and not keep(piece.piece):
+            piece.type = 5  # UNUSED
+    return spm.SentencePieceProcessor(model_proto=proto.SerializeToString())
+
+
 def ln(x, w, b):
     return F.layer_norm(x, (D,), w, b, 1e-5)
 

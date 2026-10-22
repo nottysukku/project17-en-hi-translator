@@ -1,6 +1,6 @@
 """Pack IndicTrans2 (en -> hi) into the flat blob the STM32N6 translation engine (it2.c) reads.
 
-    python it2_pack.py <model_dir> <hindi_vocab.json> <out.bin> [--dec-layers 0,2,4,...]
+    python it2_pack.py <model_dir> <hindi_vocab.json> <out.bin> [--dec-layers 0,2,4,...] [--src-keep N]
 
 Layout (little-endian; every section 64-byte aligned):
   header (it2_header_t in it2.h)
@@ -9,8 +9,14 @@ Layout (little-endian; every section 64-byte aligned):
     one float16 scale per group. A 32-value block is 16 bytes: byte i holds value i in its low
     nibble and value i+16 in its high nibble.
   tensors, in the fixed order of it2.c (see TENSOR ORDER below)
-  source vocabulary: SentencePiece BPE pieces sorted by bytes, each {offset, length, score, dict id}
+  source vocabulary: SentencePiece BPE pieces sorted by bytes, each {offset, length, score, id}
+    id = the piece's row in the source embedding; or, if --src-keep dropped that row,
+    SRC_SPLIT | (byte length of the left part): the engine then emits the two pieces the BPE
+    merged into this one, recursively (SentencePiece's rule for a restricted vocabulary).
   target vocabulary: kept Hindi tokens in id order, each {offset, length}; then the strings
+
+Version 2 (this packer) adds SRC_SPLIT entries; a blob without --src-keep is otherwise the same as
+version 1.
 """
 import argparse
 import json
@@ -20,7 +26,8 @@ import struct
 import numpy as np
 from safetensors.numpy import load_file
 
-MAGIC, VERSION, GROUP = b"IT2B", 1, 64
+MAGIC, VERSION, GROUP = b"IT2B", 2, 64
+SRC_SPLIT = 0x80000000
 KIND_F32, KIND_Q4 = 0, 1
 
 
@@ -70,6 +77,67 @@ class Packer:
         self.deq[name] = deq
 
 
+def last_merge(piece, score):
+    """Byte length of the left part of the last BPE merge that builds `piece` from its characters,
+    or None if the BPE never builds it. Within a word the merges inside a piece's span happen in
+    the same order as for the piece alone, so this split is the same wherever the piece occurs."""
+    syms, last = list(piece), None
+    while len(syms) > 1:
+        best, best_score = -1, None
+        for i in range(len(syms) - 1):
+            sc = score.get(syms[i] + syms[i + 1])
+            if sc is not None and (best_score is None or sc > best_score):
+                best, best_score = i, sc
+        if best < 0:
+            break
+        last = syms[best]
+        syms[best:best + 2] = [syms[best] + syms[best + 1]]
+    return len(last.encode("utf-8")) if (syms == [piece] and last is not None) else None
+
+
+def source_vocab(model_dir, src_dict, keep_n):
+    """Source embedding rows to keep and the tokeniser table.
+
+    keep_n = 0 keeps every row. Otherwise the special tokens, the two language tags, every
+    single-character piece and the most frequent pieces up to keep_n rows are kept. dict.SRC is
+    fairseq's dictionary, sorted by frequency in IndicTrans2's training data, so its id order is
+    the frequency ranking. Rows the tokeniser can never produce (dict entries that are not
+    SentencePiece pieces, such as stray characters) are dropped first.
+    Returns (rows: original ids in row order, pieces: sorted [(bytes, score, id)], stats).
+    """
+    from sentencepiece import sentencepiece_model_pb2 as pb
+    spm = pb.ModelProto()
+    spm.ParseFromString(open(os.path.join(model_dir, "model.SRC"), "rb").read())
+    assert spm.trainer_spec.model_type == 2, "expected a BPE model"
+    table = [(pc.piece, pc.score) for pc in spm.pieces if pc.type in (1, 4)]  # normal and user-defined
+    unk = src_dict["<unk>"]
+    if keep_n:
+        must = {0, 1, 2, 3, src_dict["eng_Latn"], src_dict["hin_Deva"]}
+        must |= {src_dict[t] for t, _ in table if len(t) == 1 and t in src_dict}
+        ranked = sorted({src_dict[t] for t, _ in table if t in src_dict} - must)
+        rows = sorted(must | set(ranked[:max(0, keep_n - len(must))]))
+    else:
+        rows = sorted(src_dict.values())
+    row_of = {orig: r for r, orig in enumerate(rows)}
+    score = dict(table)
+    pieces, split, unreachable = [], 0, 0
+    for t, sc in table:
+        if t not in src_dict:
+            pid = row_of[unk]
+        elif src_dict[t] in row_of:
+            pid = row_of[src_dict[t]]
+        else:
+            left = last_merge(t, score)
+            if left is None:
+                unreachable += 1
+                continue  # never built by the BPE: leaving it out changes nothing
+            pid = SRC_SPLIT | left
+            split += 1
+        pieces.append((t.encode("utf-8"), sc, pid))
+    pieces.sort(key=lambda e: e[0])
+    return rows, pieces, dict(split=split, unreachable=unreachable)
+
+
 def linear(p, w, prefix, name):
     p.q4(prefix + name + ".weight", w[prefix + name + ".weight"])
     p.f32(prefix + name + ".bias", w[prefix + name + ".bias"])
@@ -86,6 +154,8 @@ def main():
     ap.add_argument("vocab_json")
     ap.add_argument("out")
     ap.add_argument("--dec-layers", default="0,2,4,6,8,10,12,14,16,17")
+    ap.add_argument("--src-keep", type=int, default=0,
+                    help="keep only the N most frequent source embedding rows (0: all)")
     args = ap.parse_args()
     w = load_file(os.path.join(args.model_dir, "model.safetensors"))
     dec_layers = [int(x) for x in args.dec_layers.split(",")]
@@ -96,11 +166,12 @@ def main():
     tgt_inv = {v: k for k, v in tgt_dict.items()}
     for must in (0, 1, 2, 3):
         assert must in keep
-    kept_index = {orig: i for i, orig in enumerate(keep)}
+    src_rows, pieces, src_stats = source_vocab(args.model_dir, src_dict, args.src_keep)
+    src_row_of = {orig: r for r, orig in enumerate(src_rows)}
 
     p = Packer()
     # TENSOR ORDER (it2.c relies on it)
-    p.q4("src_emb", w["model.encoder.embed_tokens.weight"])
+    p.q4("src_emb", w["model.encoder.embed_tokens.weight"][src_rows])
     ln(p, w, "model.encoder.layernorm_embedding")
     ln(p, w, "model.encoder.layer_norm")
     for i in range(n_enc):
@@ -126,17 +197,7 @@ def main():
         linear(p, w, q, "fc1")
         linear(p, w, q, "fc2")
 
-    # Source vocabulary: SentencePiece BPE pieces with their scores, mapped to dict.SRC ids.
-    from sentencepiece import sentencepiece_model_pb2 as pb
-    spm = pb.ModelProto()
-    spm.ParseFromString(open(os.path.join(args.model_dir, "model.SRC"), "rb").read())
-    assert spm.trainer_spec.model_type == 2, "expected a BPE model"
-    pieces = []
-    for piece in spm.pieces:
-        if piece.type in (1, 4):  # normal and user-defined pieces
-            raw = piece.piece.encode("utf-8")
-            pieces.append((raw, piece.score, src_dict.get(piece.piece, src_dict["<unk>"])))
-    pieces.sort(key=lambda t: t[0])
+    # Source vocabulary: SentencePiece BPE pieces with their scores and embedding rows.
     src_strings = bytearray()
     src_entries = bytearray()
     for raw, score, sid in pieces:
@@ -175,17 +236,20 @@ def main():
         table.extend(struct.pack("<5I", kind, rows, cols, tensors_off + off, tensors_off + soff if kind else 0))
     out[header_size:header_size + table_size] = table
     hdr = struct.pack("<4s21I", MAGIC, VERSION, 512, 8, 2048, n_enc, len(dec_layers), GROUP,
-                      len(src_dict), len(keep), len(p.table),
-                      src_dict["eng_Latn"], src_dict["hin_Deva"], 0, 1, 2, 3,
+                      len(src_rows), len(keep), len(p.table),
+                      src_row_of[src_dict["eng_Latn"]], src_row_of[src_dict["hin_Deva"]], 0, 1, 2, 3,
                       len(pieces), src_off, src_str_off, tgt_off, tgt_str_off)
     out[0:len(hdr)] = hdr
     struct.pack_into("<I", out, len(hdr), len(out))  # total size
     open(args.out, "wb").write(out)
     meta = dict(dec_layers=dec_layers, n_enc=n_enc, tgt_vocab=len(keep), src_pieces=len(pieces),
-                bytes=len(out), tensors=len(p.table), kept_ids=keep)
+                src_vocab=len(src_rows), bytes=len(out), tensors=len(p.table), kept_ids=keep,
+                src_rows=src_rows)
     json.dump(meta, open(args.out + ".json", "w"))
-    print("%s: %.1f MB, %d tensors, %d enc + %d dec layers, %d source pieces, %d target tokens" %
-          (args.out, len(out) / 1e6, len(p.table), n_enc, len(dec_layers), len(pieces), len(keep)))
+    print("%s: %.1f MB, %d tensors, %d enc + %d dec layers, %d source pieces (%d split, %d left out), "
+          "%d source rows, %d target tokens" %
+          (args.out, len(out) / 1e6, len(p.table), n_enc, len(dec_layers), len(pieces), src_stats["split"],
+           src_stats["unreachable"], len(src_rows), len(keep)))
 
 
 
