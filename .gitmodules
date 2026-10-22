@@ -1,0 +1,4 @@
+[submodule "firmware-n6/src/middleware/threadx/ThreadX"]
+	path = firmware-n6/src/middleware/threadx/ThreadX
+	url = https://github.com/eclipse-threadx/threadx.git
+	branch = master

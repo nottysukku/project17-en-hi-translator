@@ -7,7 +7,7 @@ import truststore
 truststore.inject_into_ssl()
 from huggingface_hub import HfApi, hf_hub_download  # noqa: E402
 
-DL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "downloads")
+DL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "downloads")  # model-tools/downloads (gitignored)
 api = HfApi()
 
 
