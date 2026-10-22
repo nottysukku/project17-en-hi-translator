@@ -1,0 +1,18 @@
+# build output: the app (/build), the standalone FSBL project and any other
+# build-* or build_* tree, and their logs
+/build/
+/build-*/
+/build_*/
+/build*.log
+/fsbl/build/
+*.map
+*.bin
+!src/asr_engine/models/cynipsnet_v1.0/network_atonbuf.xSPI2.bin
+*.elf
+
+# python venvs
+.venv/
+__pycache__/
+
+# editor configuration
+/.vscode/
