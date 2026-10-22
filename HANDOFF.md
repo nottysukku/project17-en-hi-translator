@@ -173,6 +173,9 @@ cd ..
 python tools/flash.py n6 --models
 ```
 
+To try the translation before the voice (steps 3-6 skipped): build as in step 7 (the log then says
+"Hindi voice: no networks ... (text only)") and flash with `python tools/flash.py n6 --models --allow-missing`.
+
 **Send back:**
 1. The output of steps 5 and 6 (especially lines with `octoFlash`, `hyperRAM`, `HW`/`SW`, and the `.bin`
    names and sizes), and of step 7's configure line "Hindi voice: ..." and the last `NOR_APP` line.

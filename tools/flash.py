@@ -5,6 +5,7 @@
     python flash.py n6                   sign and program the N6 firmware (FSBL + app)
     python flash.py n6 --models          also program every model blob (ASR, translation, voice, font)
     python flash.py models               only the model blobs (after a model changed)
+    add --allow-missing to program the blobs that exist (e.g. text only, before the voice networks)
 
 Both boards may be plugged in at once: each command picks its probe by the board name the ST-LINK
 reports. The N6 must be in development boot mode while it is programmed (BOOT1 = H), then back in
@@ -90,7 +91,7 @@ def sign_n6():
         run([SIGN, "-s", "-bin", src, "-nk", "-of", "0x80000000", "-t", "fsbl", "-o", dst, "-hv", "2.3", "-align"])
 
 
-def model_blobs():
+def model_blobs(allow_missing=False):
     """[-d, file, address] for every flash entry of models.json that has a file; checks the sizes."""
     with open(N6_MODELS_JSON, encoding="utf-8") as f:
         layout = json.load(f)
@@ -106,8 +107,11 @@ def model_blobs():
             sys.exit("%s is larger than its slot in models.json" % path)
         print("  %-12s %s  %6.2f MB  %s" % (blob["name"], blob["address"], os.path.getsize(path) / 1e6, blob["file"]))
         args += ["-d", path, blob["address"]]
-    if missing:
-        sys.exit("Missing model blobs (see HANDOFF.md for how each is made):\n  " + "\n  ".join(missing))
+    if missing and not allow_missing:
+        sys.exit("Missing model blobs (see HANDOFF.md for how each is made; --allow-missing skips them):\n  " +
+                 "\n  ".join(missing))
+    for m in missing:
+        print("  skipped (missing): " + m)
     return args
 
 
@@ -119,7 +123,7 @@ def flash_n6(args):
                   "-d", os.path.join(N6_BUILD, "app-trusted.bin"), "0x70100000"]
     if args.models:
         print("Model blobs (models.json):")
-        files += model_blobs()
+        files += model_blobs(args.allow_missing)
     serial = pick("STM32N6570")
     if not args.yes:
         input("Set BOOT1 (SW1) on the DK to H (right), press RESET, then press Enter here... ")
@@ -135,7 +139,9 @@ def main():
     n6 = sub.add_parser("n6")
     n6.add_argument("--models", action="store_true", help="also program the model blobs")
     n6.add_argument("--yes", action="store_true", help="do not wait for the BOOT1 switch")
+    n6.add_argument("--allow-missing", action="store_true", help="skip model blobs that are not built yet")
     models = sub.add_parser("models")
+    models.add_argument("--allow-missing", action="store_true", help="skip model blobs that are not built yet")
     models.add_argument("--yes", action="store_true", help="do not wait for the BOOT1 switch")
     models.set_defaults(models=True)
     args = parser.parse_args()
