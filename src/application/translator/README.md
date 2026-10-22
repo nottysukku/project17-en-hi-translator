@@ -9,7 +9,10 @@ cables: no battery or separate supply.
 ## Wiring
 
 [wiring.html](wiring.html) draws the whole setup with the connections in wiring order; open it in
-a browser.
+a browser. The same as images: [wiring_schematic.png](wiring_schematic.png) (the drawing) and
+[wiring_full.png](wiring_full.png) (the drawing, the numbered steps and the notes).
+
+![Wiring of the whole setup](wiring_schematic.png)
 
 All pins were checked against UM3300 (DK), UM3301 (Nucleo), the TMUX1574 data sheet, the CubeMX pin
 database, and ST's own WBA LE Audio example, which uses SAI1 on PB6, PB5 and PB7.
