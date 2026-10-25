@@ -14,16 +14,23 @@ file before changing anything.
 - Use: an internal demo / education.
 - The owner wants all firmware and model work done. Their part is to connect the boards, say "flash", have it flashed, and test.
 
-## 2. Hardware (already decided and drawn)
+## 2. Hardware (audio output & wiring)
 
 - **STM32N6570-DK:**
   - Cortex-M55 at 800 MHz with Helium, plus the Neural-ART NPU.
   - 32 MB PSRAM at 0x90000000.
   - 128 MB octal NOR at 0x70000000.
   - 800x480 touch LCD.
-- **NUCLEO-WBA55CG:** BLE only, LE Audio.
-- **Signal path:** TMUX1574 2:1 switch → MAX98357A, GAIN = 100 kΩ to VIN (3 dB, required) → 8 Ω 0.5 W speaker. The amp's VIN comes from DK CN8-5 (5 V); there is no battery.
-- **Pins:**
+  - Onboard 3.5 mm stereo audio jack (TRRS) driven by WM8904 codec.
+- **NUCLEO-WBA55CG:** BLE only, LE Audio music receiver.
+- **Audio output specification for translated Hindi (on-the-fly speech):**
+  - **Output port:** Onboard 3.5 mm audio jack on the STM32N6570-DK.
+  - **Amplifier:** PAM8403 Class-D stereo 3 W amplifier module.
+  - **Power & Filtering:** 5 V (DK CN8-5) and GND (DK CN8-6). A **470 µF electrolytic capacitor** must be placed directly across VCC and GND close to the PAM8403 board to absorb current spikes and prevent brownouts / audio pops.
+  - **Speaker:** 4 Ω, 3 W speaker connected across the PAM8403 speaker output terminals (L+ / L- or R+ / R-). *Note: PAM8403 outputs are bridge-tied loads (BTL); neither speaker terminal must ever be connected to ground.*
+- **Alternate / Shared Signal Path (I2S & Music Receiver):**
+  - TMUX1574 2:1 switch → MAX98357A (GAIN = 100 kΩ to VIN, 3 dB) → speaker, with WBA SAI1_B on side A and N6 SAI2_B on side B.
+- **Control Pins:**
   - N6 I2S: SAI2_B on A2/D6/D8.
   - WBA I2S: SAI1_B on PB6/PB5/PB7.
   - TMUX SEL: N6 D7 = PD6.

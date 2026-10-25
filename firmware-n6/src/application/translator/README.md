@@ -1,12 +1,34 @@
 # Translator mode
 
 Build with `-DAPP_TRANSLATOR_MODE=ON`. In this mode the STM32N6570-DK recognizes English and shows
-the Hindi translation. It speaks through a MAX98357A amplifier and an 8 Ω 0.5 W speaker, which it
-shares with a NUCLEO-WBA55CG Bluetooth LE Audio music receiver through a TMUX1574 switch. While
-music plays, the music has the speaker and the N6 sleeps. Everything runs from the boards' USB
-cables: no battery or separate supply.
+the Hindi translation in Devanagari script.
 
-## Wiring
+## Audio Output Specification: On-The-Fly Hindi Translation
+
+For the audio output (the on-the-fly Hindi being translated and spoken with the neural voice):
+- **Output Port:** STM32N6570-DK onboard **3.5 mm stereo audio jack** (driven by the onboard WM8904 audio codec).
+- **Amplifier:** **PAM8403** Class-D stereo 3 W amplifier module.
+- **Power Decoupling Capacitor:** **470 µF electrolytic capacitor** connected directly across 5 V (VCC) and GND, located physically close to the PAM8403 module.
+- **Speaker:** **4 Ω, 3 Watt speaker** connected to the PAM8403 speaker output terminals.
+
+### PAM8403 Wiring & Connection Details
+
+1. **Audio Input:**
+   - 3.5 mm audio plug / breakout Left or Right audio signal → PAM8403 `L_IN` (or `R_IN`).
+   - 3.5 mm audio ground (sleeve) → PAM8403 audio ground (`GND`).
+2. **Power Supply (+5V & GND):**
+   - PAM8403 `+5V` (VCC) → STM32N6570-DK CN8 pin 5 (+5 V output).
+   - PAM8403 `GND` → STM32N6570-DK CN8 pin 6 (GND).
+   - **470 µF Capacitor:** Solder or connect a 470 µF capacitor (rated ≥10 V) directly across the `+5V` and `GND` terminals right at the PAM8403 board. This provides local reservoir capacitance to absorb high-frequency Class-D switching spikes, prevents audio distortion/pops, and avoids MCU brownout dips.
+3. **Speaker Output:**
+   - Connect the 4 Ω 3 W speaker across PAM8403 `+OUT_L` and `-OUT_L` (or right channel `+OUT_R` and `-OUT_R`).
+   - **CRITICAL (BTL Output):** The PAM8403 uses bridge-tied load (BTL) outputs. **Neither speaker terminal may be connected to ground, nor connected to each other, nor shared across channels.** Direct ground connection shorts internal MOSFET switches and destroys the PAM8403.
+
+---
+
+## Alternate / Shared I2S Wiring (with WBA LE Audio Receiver)
+
+The system also supports sharing a MAX98357A I2S amplifier with a NUCLEO-WBA55CG Bluetooth LE Audio music receiver through a TMUX1574 switch. While music plays, the music has the speaker and the N6 sleeps. Everything runs from the boards' USB cables: no battery or separate supply.
 
 [wiring.html](wiring.html) draws the whole setup with the connections in wiring order; open it in
 a browser. The same as images: [wiring_schematic.png](wiring_schematic.png) (the drawing) and

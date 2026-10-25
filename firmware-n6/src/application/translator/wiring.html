@@ -344,6 +344,17 @@ footer.chain code { font-family: var(--mono); font-size: 12.5px; color: #fff; }
     </svg>
   </figure>
 
+  <div class="panel" style="border-color:#10b981;background:#042f2e;color:#ecfdf5;margin-bottom:10px;">
+    <h3 style="color:#34d399;font-size:22px;">&#9733; Hindi Speech Output (On-the-fly Translation): 3.5 mm Jack + PAM8403</h3>
+    <p>For on-the-fly spoken Hindi output, audio routes from the STM32N6570-DK onboard <strong>3.5 mm audio jack</strong> into an external <strong>PAM8403</strong> Class-D amplifier driving a <strong>4 &Omega; 3 W speaker</strong>:</p>
+    <ul style="color:#d1fae5;">
+      <li><strong>Audio Input:</strong> 3.5 mm jack Left/Right channel &rarr; PAM8403 <code>L_IN</code> (or <code>R_IN</code>), Ground sleeve &rarr; PAM8403 <code>GND</code>.</li>
+      <li><strong>Power (+5V & GND):</strong> PAM8403 <code>+5V</code> &rarr; DK <code>CN8 pin 5</code> (+5V), PAM8403 <code>GND</code> &rarr; DK <code>CN8 pin 6</code> (GND).</li>
+      <li><strong>470 &mu;F Capacitor (Required):</strong> Connect a <strong>470 &mu;F electrolytic capacitor</strong> directly across PAM8403 <code>+5V</code> and <code>GND</code> close to the amplifier to eliminate switching ripple, pops, and 5V rail sags.</li>
+      <li><strong>Speaker:</strong> Connect the <strong>4 &Omega; 3 W speaker</strong> across PAM8403 <code>OUT+</code> and <code>OUT&minus;</code>. <em>(BTL output: never connect either speaker terminal to ground!)</em></li>
+    </ul>
+  </div>
+
   <div>
     <h2>Wire it in this order</h2>
     <p class="sub">Numbers match the red markers on the drawing. Keep both USB cables unplugged while wiring, and check the grounds, the 5 V line and the GAIN resistor before you power up.</p>
