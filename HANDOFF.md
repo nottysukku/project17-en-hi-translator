@@ -14,29 +14,24 @@ file before changing anything.
 - Use: an internal demo / education.
 - The owner wants all firmware and model work done. Their part is to connect the boards, say "flash", have it flashed, and test.
 
-## 2. Hardware (audio output & wiring)
+## 2. Hardware (as wired now, 2026-10-25)
 
 - **STM32N6570-DK:**
   - Cortex-M55 at 800 MHz with Helium, plus the Neural-ART NPU.
   - 32 MB PSRAM at 0x90000000.
   - 128 MB octal NOR at 0x70000000.
   - 800x480 touch LCD.
-  - Onboard 3.5 mm stereo audio jack (TRRS) driven by WM8904 codec.
-- **NUCLEO-WBA55CG:** BLE only, LE Audio music receiver.
-- **Audio output specification for translated Hindi (on-the-fly speech):**
-  - **Output port:** Onboard 3.5 mm audio jack on the STM32N6570-DK.
-  - **Amplifier:** PAM8403 Class-D stereo 3 W amplifier module.
-  - **Power & Filtering:** 5 V (DK CN8-5) and GND (DK CN8-6). A **470 µF electrolytic capacitor** must be placed directly across VCC and GND close to the PAM8403 board to absorb current spikes and prevent brownouts / audio pops.
-  - **Speaker:** 4 Ω, 3 W speaker connected across the PAM8403 speaker output terminals (L+ / L- or R+ / R-). *Note: PAM8403 outputs are bridge-tied loads (BTL); neither speaker terminal must ever be connected to ground.*
-- **Alternate / Shared Signal Path (I2S & Music Receiver):**
-  - TMUX1574 2:1 switch → MAX98357A (GAIN = 100 kΩ to VIN, 3 dB) → speaker, with WBA SAI1_B on side A and N6 SAI2_B on side B.
-- **Control Pins:**
-  - N6 I2S: SAI2_B on A2/D6/D8.
-  - WBA I2S: SAI1_B on PB6/PB5/PB7.
-  - TMUX SEL: N6 D7 = PD6.
-  - Amp SD: N6 D4 = PH5.
-  - Music line: WBA PB0 → N6 D2 = PD0.
-- Full table: `firmware-n6/src/application/translator/README.md`.
+  - WM8904 codec (SAI1 block A on PG7/PB6/PB7/PB0, I2C2 address 0x34, shared with the touch
+    controller) with a 3.5 mm audio jack.
+- **NUCLEO-WBA55CG:** BLE only, LE Audio music receiver; I2S out on SAI1 block B (PB6/PB5/PB7).
+- **Speaker (the owner's choice):** DK 3.5 mm jack → PAM8403 module (470 µF across its 5 V input,
+  at the module; 5 V from DK CN8-5) → 4 Ω 3 W speaker on L+/L−. **No MAX98357A.**
+- **Music path:** WBA I2S → TMUX1574 side A → DK SAI2 block B (slave receiver on A2/D6/D8) → the
+  DK plays it on the jack. TMUX SEL = GND; EN = DK D7 (PD6), active low, 10 kΩ pull-up: open until
+  the firmware has made A2/D6/D8 inputs. Music line: WBA PB0 → TMUX S4A/D4 → DK D2 (PD0), 100 kΩ to
+  GND. D4 (PH5) is no longer used.
+- Full table, drawing and wiring order: `firmware-n6/src/application/translator/README.md`,
+  `wiring.html`, `wiring_schematic.png`.
 
 ## 3. Status in one paragraph
 
@@ -46,6 +41,10 @@ it, with music cancelling translation and speech at once. All models fit the 128
 `firmware-n6/src/application/translator/models.json`). What is left for the owner: compile the two voice
 networks with ST Edge AI, build, flash, and send back the logs (section 6). The next agent then fixes what the
 board shows and measures speed (section 7).
+
+Added 2026-10-25 (same branch): the audio now leaves through the DK's 3.5 mm jack (WM8904), which also plays
+the WBA's music received over I2S through the TMUX1574 (section 2); and a Colab notebook that fine-tunes the
+speech recognizer for Indian-accented English (`model-tools/asr_finetune/`). Neither has run on the board yet.
 
 ## 4. What exists
 
@@ -57,6 +56,11 @@ board shows and measures speed (section 7).
   - `asr_engine_npu_acquire()/release()` lets the translator borrow the NPU: it holds the recognizer's input
     semaphore, so no window runs or is written while the voice networks use the shared NPU memories.
 - **Translator mode** (`src/application/translator/`, `-DAPP_TRANSLATOR_MODE=ON`), see its README:
+  - `xl_audio_out.c`: SAI1 block A I2S master + MCLK into the WM8904 (ST's `stm32-wm8904` V1.1.1 in
+    `src/hardware/components/wm8904`), headphone volume -14 dB; music in on SAI2 block B (slave, GPDMA1 ch. 5),
+    mixed to mono and read at the jack's rate by a PI loop on the ring level (simulated: stable 16-48 kHz and
+    with 1 % clock mismatch). Source changes fade over 5 ms in the DMA interrupt. `xl_router.c`: AUTO /
+    TRANSLATE / MUSIC choose the source; D7 opens and closes the TMUX.
   - `xl_sentence.c`: sentence cutting (end mark not after Mr./Dr./...; 1.2 s pause; 200 characters).
   - `xl_translator.c`: the translator thread (priority 13, lowest). Per sentence: sentence case, `it2_translate`,
     publish the Hindi, then (if the N6 has the speaker) speak with recognition paused and the NPU borrowed.
@@ -65,7 +69,7 @@ board shows and measures speed (section 7).
     64 frames + 15 each side) → `xl_resample.c` (16 → 48 kHz, 96 taps) → speaker ring; audio is queued once two
     vocoder steps are ahead. Logs the time of each stage ("Speech: ...").
   - `xl_display.c`: two lines of English, the Hindi below (`xl_hindi_text.c`), "Translating..." / "Speaking
-    Hindi..." in the status bar. On music: flush and stop the speaker, cancel, drop the half-heard sentence.
+    Hindi..." in the status bar. On music: flush the speech (the stream keeps running: it carries the music), cancel, drop the half-heard sentence.
   - `models.json` → `tools/models_layout.py` → `xl_models.h` (addresses). The linker's NOR_APP now ends at
     0x70500000 (4 MB; the app is 1.24 MB without the voice networks' generated code).
   - Not yet tested with the wiring, and the speed is unknown.
@@ -90,6 +94,14 @@ Unchanged: ST `BLE_Audio_TMAP_Peripheral` ported to the Nucleo, built with CMake
 Details in its README.
 
 ### model-tools
+
+- Speech recognition, Indian English: `asr_finetune/` (Colab notebook `asr_indian_english.ipynb`, built from
+  `asr_lib.py` by `make_notebook.py`; `smoke_test.py`; `st_compile_asr.sh`; README). It starts from the ONNX
+  file `cynipsnet_punct1` was compiled from (on the owner's PC: `cynipsnet_re\deploy\out\cynipsnet_punct1\`),
+  keeps every layer, and exports int8 with the board's input scale. Features checked against the board:
+  `asr_feature_check.py` + `firmware-n6/src/asr_engine/test/feature_host.c` (all int8 codes equal). The "268
+  epochs" in the CynipsNet README are NPU scheduling steps; the original fine-tune stopped at training epoch 4
+  (`epoch_04_step_00021311_v9.tflite`).
 
 - Translation: `it2_pack.py` (`--scale8`, `--src-keep`), `vocab_trim.py --max N`, `it2_trim_eval.py` (packs and
   scores variants in parallel), `it2_host_check.py` (`--save`, `--compare`), `assets/hindi_vocab_31k.json`.
@@ -193,6 +205,12 @@ To try the translation before the voice (steps 3-6 skipped): build as in step 7 
 If a step fails, send its last 30 lines; do not work around it.
 
 ## 7. Next tasks, in order
+
+0. **New (2026-10-25):** (a) the owner runs the Colab notebook (`model-tools/asr_finetune/README.md`) and
+   sends the table of its last cell; compile with `st_compile_asr.sh`, build with
+   `-DASR_MODEL_NETWORK=cynipsnet_inen1`, compare on the board. (b) First test of the jack: log line
+   "Audio: WM8904 found, jack at 47991 Hz", TONE, then the WBA's music through the TMUX ("Audio: music input
+   at 48000 Hz"). If the WM8904 is not found, the DK may be an older revision with a CS42L51 (not supported).
 
 1. **Get the owner's results through:** fix compile or link errors from the generated code (the file and
    function names `stai_flow_*` / `stai_vocoder_*` and the `.bin` names in `models.json` are assumptions about

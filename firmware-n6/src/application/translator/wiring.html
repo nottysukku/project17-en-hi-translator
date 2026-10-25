@@ -46,11 +46,11 @@ h2 { font-family: var(--display); font-weight: 700; font-size: 26px; text-transf
 .panel { background: var(--navy); color: var(--card-text); border-radius: 12px; padding: 16px 18px; border: 2px solid #2a3a66; min-width: 0; display: grid; gap: 10px; align-content: start; }
 .panel h3 { margin: 0; font-family: var(--display); font-weight: 700; font-size: 20px; text-transform: uppercase; letter-spacing: 0.03em; color: #fff; }
 .panel p, .panel li { font-size: 13.5px; line-height: 1.5; margin: 0; }
-.panel ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.panel ul, .panel ol { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
 .panel.warn { background: #fff7e0; color: #4a3500; border-color: var(--amber); }
 .panel.warn h3 { color: #8a5a00; }
 .panel.warn code { color: #4a3500; }
-table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; color: inherit; }
 th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #2a3a66; vertical-align: top; }
 th { font-family: var(--display); font-weight: 600; font-size: 15px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--card-dim); }
 td.mono { font-family: var(--mono); color: #fff; }
@@ -74,7 +74,7 @@ footer.chain code { font-family: var(--mono); font-size: 12.5px; color: #fff; }
 .sv-darkmono { font-family: var(--mono); font-weight: 600; fill: var(--ink); }
 .sv-alert { font-family: var(--body); font-weight: 600; fill: #9a3412; }
 .wire { fill: none; stroke-width: 4.5; stroke-linecap: round; stroke-linejoin: round; }
-.wire.fat { stroke-width: 6; }
+.wire.fat { stroke-width: 9; }
 .wire.dash { stroke-dasharray: 11 7; }
 .thin { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
 .marker circle { fill: #dc2626; stroke: #fff; stroke-width: 2.5; }
@@ -88,10 +88,10 @@ footer.chain code { font-family: var(--mono); font-size: 12.5px; color: #fff; }
 <header class="band">
   <div class="band-inner">
     <div>
-      <h1>Project 17 — STM32N6570-DK + NUCLEO-WBA55CG → TMUX1574 → MAX98357A → 8&nbsp;Ω 0.5&nbsp;W speaker</h1>
-      <p>Two I2S masters share one speaker. Side A is the WBA's Bluetooth LE Audio music: the default, and the only source while the N6 sleeps. Side B is the N6's English-to-Hindi translator. The N6 flips SEL, mutes the amplifier during each switch, and listens to the WBA's "music playing" line. No battery: the amplifier runs from the DK's 5 V pin, and each board from its own USB cable.</p>
+      <h1>Project 17 — STM32N6570-DK 3.5&nbsp;mm jack → PAM8403 → 4&nbsp;Ω 3&nbsp;W speaker · NUCLEO-WBA55CG music in through a TMUX1574</h1>
+      <p>One speaker plays both: the N6's spoken Hindi and the WBA's Bluetooth LE Audio music. The WBA sends its decoded music as I2S to the DK, through the TMUX1574, and the DK plays whichever source has the floor on its own 3.5 mm jack (WM8904 codec). Music always wins. The TMUX keeps the two boards apart until the DK has set its pins to receive, and whenever the DK is off. No MAX98357A. No battery: the PAM8403 runs from the DK's 5 V pin, and each board from its own USB cable.</p>
     </div>
-    <span class="badge">AUTO SWITCH · N6 SLEEPS DURING MUSIC</span>
+    <span class="badge">AUTO SWITCH · MUSIC WINS</span>
   </div>
 </header>
 
@@ -100,13 +100,14 @@ footer.chain code { font-family: var(--mono); font-size: 12.5px; color: #fff; }
     <span><i style="border-color:#f97316"></i>+3V3</span>
     <span><i style="border-color:#e11d48"></i>+5V from the DK</span>
     <span><i style="border-color:#111827"></i>GND</span>
-    <span><i style="border-color:#eab308"></i>BCLK</span>
-    <span><i style="border-color:#16a34a"></i>LRC / word select</span>
-    <span><i style="border-color:#2563eb"></i>DIN / data</span>
-    <span><i class="dash" style="border-color:#4b5d80"></i>dashed = WBA side</span>
-    <span><i style="border-color:#0891b2"></i>SEL</span>
-    <span><i style="border-color:#db2777"></i>amp SD</span>
+    <span><i style="border-color:#eab308"></i>I2S bit clock</span>
+    <span><i style="border-color:#16a34a"></i>I2S word select</span>
+    <span><i style="border-color:#2563eb"></i>I2S data</span>
     <span><i style="border-color:#7c3aed"></i>music line</span>
+    <span><i class="dash" style="border-color:#4b5d80"></i>dashed = WBA side of the TMUX</span>
+    <span><i style="border-color:#0891b2"></i>TMUX EN</span>
+    <span><i style="border-color:#db2777"></i>audio left (tip)</span>
+    <span><i style="border-color:#0d9488"></i>audio right (ring)</span>
   </div>
 
   <figure class="sheet" aria-label="Wiring schematic of the whole setup">
@@ -119,26 +120,31 @@ footer.chain code { font-family: var(--mono); font-size: 12.5px; color: #fff; }
 
       <!-- ============ STM32N6570-DK ============ -->
       <text class="sv-ink" x="40" y="80" font-size="32">STM32N6570-DK</text>
-      <text class="sv-dark" x="40" y="104" font-size="13">MB1939 · English → Hindi translator · board flipped: the Arduino headers are on the underside · powered by USB-C on CN6</text>
+      <text class="sv-dark" x="40" y="104" font-size="13">English → Hindi translator · the Arduino headers are on the underside · powered by USB-C on CN6</text>
       <g>
         <rect x="40" y="130" width="340" height="706" rx="18" fill="#1d3a86" stroke="#0b1630" stroke-width="3"/>
         <g fill="#d4a537"><circle cx="66" cy="156" r="10"/><circle cx="354" cy="156" r="10"/><circle cx="66" cy="810" r="10"/><circle cx="354" cy="810" r="10"/></g>
-        <text class="sv-sub" x="64" y="472" font-size="13">I2S master</text>
-        <text class="sv-mono" x="64" y="492" font-size="13">SAI2 block B</text>
-        <text class="sv-note" x="64" y="510" font-size="12">AF10 · 48 kHz · 16-bit</text>
-        <rect x="64" y="600" width="86" height="86" rx="6" fill="#0b1630" stroke="#5b76b8" stroke-width="2"/>
-        <text class="sv-mono" x="107" y="638" font-size="15" text-anchor="middle">N657</text>
-        <text class="sv-note" x="107" y="658" font-size="11" text-anchor="middle">+ NPU</text>
+        <text class="sv-sub" x="64" y="300" font-size="13">I2S slave receiver</text>
+        <text class="sv-mono" x="64" y="320" font-size="13">SAI2 block B</text>
+        <text class="sv-note" x="64" y="338" font-size="12">AF10 · the WBA's clock</text>
+        <rect x="64" y="470" width="86" height="86" rx="6" fill="#0b1630" stroke="#5b76b8" stroke-width="2"/>
+        <text class="sv-mono" x="107" y="508" font-size="15" text-anchor="middle">N657</text>
+        <text class="sv-note" x="107" y="528" font-size="11" text-anchor="middle">+ NPU</text>
+        <rect x="64" y="702" width="150" height="60" rx="6" fill="#0b1630" stroke="#f472b6" stroke-width="2"/>
+        <text class="sv-mono" x="139" y="728" font-size="14" text-anchor="middle">WM8904</text>
+        <text class="sv-note" x="139" y="747" font-size="11" text-anchor="middle">codec · SAI1_A + I2C2</text>
+        <path class="thin" stroke="#f472b6" d="M214 732H330"/>
+        <text class="sv-note" x="272" y="722" font-size="11" text-anchor="middle">headphone out</text>
         <g text-anchor="end">
           <text class="sv-mono" x="356" y="198" font-size="13">CN8 pin 4 · +3V3</text><text class="sv-note" x="356" y="213" font-size="11">→ TMUX VDD (16)</text>
-          <text class="sv-mono" x="356" y="248" font-size="13">D7 · PD6 · CN11-8</text><text class="sv-note" x="356" y="263" font-size="11">→ TMUX SEL (1)</text>
-          <text class="sv-mono" x="356" y="328" font-size="13">A2 · PE12 · CN7-3</text><text class="sv-note" x="356" y="343" font-size="11">SAI2_SCK_B → S1B (3)</text>
-          <text class="sv-mono" x="356" y="378" font-size="13">D6 · PE13 · CN11-7</text><text class="sv-note" x="356" y="393" font-size="11">SAI2_FS_B → S2B (6)</text>
-          <text class="sv-mono" x="356" y="428" font-size="13">D8 · PE7 · CN12-1</text><text class="sv-note" x="356" y="443" font-size="11">SAI2_SD_B → S3B (10)</text>
-          <text class="sv-mono" x="356" y="518" font-size="13">D4 · PH5 · CN11-5</text><text class="sv-note" x="356" y="533" font-size="11">open-drain → amp SD</text>
-          <text class="sv-mono" x="356" y="588" font-size="13">D2 · PD0 · CN11-3</text><text class="sv-note" x="356" y="603" font-size="11">← WBA music line</text>
-          <text class="sv-mono" x="356" y="718" font-size="13">CN8 pin 6 · GND</text><text class="sv-note" x="356" y="733" font-size="11">common ground</text>
-          <text class="sv-mono" x="356" y="778" font-size="13">CN8 pin 5 · +5V</text><text class="sv-note" x="356" y="793" font-size="11">5 V output → MAX VIN</text>
+          <text class="sv-mono" x="356" y="248" font-size="13">D7 · PD6 · CN11-8</text><text class="sv-note" x="356" y="263" font-size="11">→ TMUX EN (15), low = on</text>
+          <text class="sv-mono" x="356" y="328" font-size="13">A2 · PE12 · CN7-3</text><text class="sv-note" x="356" y="343" font-size="11">SAI2_SCK_B ← D1 (4)</text>
+          <text class="sv-mono" x="356" y="378" font-size="13">D6 · PE13 · CN11-7</text><text class="sv-note" x="356" y="393" font-size="11">SAI2_FS_B ← D2 (7)</text>
+          <text class="sv-mono" x="356" y="428" font-size="13">D8 · PE7 · CN12-1</text><text class="sv-note" x="356" y="443" font-size="11">SAI2_SD_B ← D3 (9)</text>
+          <text class="sv-mono" x="356" y="488" font-size="13">D2 · PD0 · CN11-3</text><text class="sv-note" x="356" y="503" font-size="11">music line ← D4 (12)</text>
+          <text class="sv-mono" x="356" y="578" font-size="13">CN8 pin 6 · GND</text><text class="sv-note" x="356" y="593" font-size="11">common ground</text>
+          <text class="sv-mono" x="356" y="658" font-size="13">CN8 pin 5 · +5V</text><text class="sv-note" x="356" y="673" font-size="11">5 V output → PAM8403</text>
+          <text class="sv-mono" x="356" y="778" font-size="13">3.5 mm jack</text><text class="sv-note" x="356" y="793" font-size="11">plug → PAM8403 input</text>
         </g>
         <g stroke="#fff" stroke-width="2">
           <rect x="368" y="192" width="24" height="16" rx="3" fill="#f97316"/>
@@ -146,11 +152,13 @@ footer.chain code { font-family: var(--mono); font-size: 12.5px; color: #fff; }
           <rect x="368" y="322" width="24" height="16" rx="3" fill="#eab308"/>
           <rect x="368" y="372" width="24" height="16" rx="3" fill="#16a34a"/>
           <rect x="368" y="422" width="24" height="16" rx="3" fill="#2563eb"/>
-          <rect x="368" y="512" width="24" height="16" rx="3" fill="#db2777"/>
-          <rect x="368" y="582" width="24" height="16" rx="3" fill="#7c3aed"/>
-          <rect x="368" y="712" width="24" height="16" rx="3" fill="#111827"/>
-          <rect x="368" y="772" width="24" height="16" rx="3" fill="#e11d48"/>
+          <rect x="368" y="482" width="24" height="16" rx="3" fill="#7c3aed"/>
+          <rect x="368" y="572" width="24" height="16" rx="3" fill="#111827"/>
+          <rect x="368" y="652" width="24" height="16" rx="3" fill="#e11d48"/>
         </g>
+        <!-- the jack on the board's edge -->
+        <rect x="330" y="714" width="44" height="40" rx="6" fill="#111827" stroke="#fff" stroke-width="2"/>
+        <circle cx="374" cy="734" r="11" fill="#0b0f1a" stroke="#9ca3af" stroke-width="3"/>
       </g>
 
       <!-- ============ NUCLEO-WBA55CG ============ -->
@@ -159,26 +167,26 @@ footer.chain code { font-family: var(--mono); font-size: 12.5px; color: #fff; }
       <g>
         <rect x="1220" y="130" width="340" height="600" rx="18" fill="#0e4a55" stroke="#0b1630" stroke-width="3"/>
         <g fill="#d4a537"><circle cx="1246" cy="156" r="10"/><circle cx="1534" cy="156" r="10"/><circle cx="1246" cy="704" r="10"/><circle cx="1534" cy="704" r="10"/></g>
-        <text class="sv-sub" x="1244" y="200" font-size="13">I2S master</text>
+        <text class="sv-sub" x="1244" y="200" font-size="13">I2S master (its own clock)</text>
         <text class="sv-mono" x="1244" y="220" font-size="13">SAI1 block B</text>
-        <text class="sv-note" x="1244" y="238" font-size="12">LC3 decode → I2S, 48 kHz</text>
+        <text class="sv-note" x="1244" y="238" font-size="12">LC3 decode → I2S, 16-bit stereo</text>
         <path d="M1470 262 l12 -16 l12 16 l12 -16 l12 16 l12 -16" class="thin" stroke="#7fd3dd"/>
         <text class="sv-note" x="1506" y="282" font-size="11" text-anchor="middle">antenna</text>
         <g>
           <text class="sv-mono" x="1244" y="328" font-size="13">D3 · PB6 · CN8-4</text><text class="sv-note" x="1244" y="343" font-size="11">SAI1_SCK_B → S1A (2)</text>
           <text class="sv-mono" x="1244" y="378" font-size="13">PB5 · morpho CN4-35</text><text class="sv-note" x="1244" y="393" font-size="11">SAI1_FS_B → S2A (5)</text>
           <text class="sv-mono" x="1244" y="428" font-size="13">D2 · PB7 · CN8-3</text><text class="sv-note" x="1244" y="443" font-size="11">SAI1_SD_B → S3A (11)</text>
-          <text class="sv-mono" x="1244" y="588" font-size="13">D6 · PB0 · CN8-7</text><text class="sv-note" x="1244" y="603" font-size="11">music playing → DK D2</text>
+          <text class="sv-mono" x="1244" y="488" font-size="13">D6 · PB0 · CN8-7</text><text class="sv-note" x="1244" y="503" font-size="11">music playing → S4A (14)</text>
           <text class="sv-mono" x="1244" y="658" font-size="13">CN5 pin 6 · GND</text><text class="sv-note" x="1244" y="673" font-size="11">common ground</text>
         </g>
-        <rect x="1244" y="476" width="296" height="62" rx="8" fill="#0b1630" stroke="#f5b301" stroke-width="1.5"/>
-        <text x="1258" y="499" font-size="12.5" fill="#f5b301" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-weight="600">PB6 = user button B2, PB7 = B3</text>
-        <text class="sv-note" x="1258" y="519" font-size="12">Don't press them while music plays.</text>
+        <rect x="1244" y="546" width="296" height="62" rx="8" fill="#0b1630" stroke="#f5b301" stroke-width="1.5"/>
+        <text x="1258" y="569" font-size="12.5" fill="#f5b301" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-weight="600">PB6 = user button B2, PB7 = B3</text>
+        <text class="sv-note" x="1258" y="589" font-size="12">Don't press them while music plays.</text>
         <g stroke="#fff" stroke-width="2">
           <rect x="1208" y="322" width="24" height="16" rx="3" fill="#eab308"/>
           <rect x="1208" y="372" width="24" height="16" rx="3" fill="#16a34a"/>
           <rect x="1208" y="422" width="24" height="16" rx="3" fill="#2563eb"/>
-          <rect x="1208" y="582" width="24" height="16" rx="3" fill="#7c3aed"/>
+          <rect x="1208" y="482" width="24" height="16" rx="3" fill="#7c3aed"/>
           <rect x="1208" y="652" width="24" height="16" rx="3" fill="#111827"/>
         </g>
       </g>
@@ -200,182 +208,166 @@ footer.chain code { font-family: var(--mono); font-size: 12.5px; color: #fff; }
 
       <!-- ============ TMUX1574 ============ -->
       <g>
-        <rect x="640" y="168" width="280" height="362" rx="12" fill="#14532d" stroke="#0b1630" stroke-width="3"/>
+        <rect x="640" y="168" width="280" height="390" rx="12" fill="#14532d" stroke="#0b1630" stroke-width="3"/>
         <text class="sv-title" x="780" y="200" font-size="22" text-anchor="middle">TMUX1574PWR</text>
-        <text class="sv-note" x="780" y="224" font-size="12" text-anchor="middle" fill="#bbf7d0">TSSOP-16 on breakout · 4 × 2:1</text>
-        <rect x="730" y="268" width="100" height="180" rx="6" fill="#0b1630" stroke="#4ade80" stroke-width="1.5"/>
-        <circle cx="742" cy="280" r="4" fill="#4ade80"/>
-        <text class="sv-mono" x="780" y="318" font-size="13" text-anchor="middle">TI</text>
-        <text class="sv-note" x="780" y="350" font-size="11" text-anchor="middle" fill="#bbf7d0">SEL 0 → A</text>
-        <text class="sv-note" x="780" y="368" font-size="11" text-anchor="middle" fill="#bbf7d0">(WBA music)</text>
-        <text class="sv-note" x="780" y="392" font-size="11" text-anchor="middle" fill="#bbf7d0">SEL 1 → B</text>
-        <text class="sv-note" x="780" y="410" font-size="11" text-anchor="middle" fill="#bbf7d0">(N6 voice)</text>
-        <text class="sv-note" x="780" y="434" font-size="11" text-anchor="middle" fill="#bbf7d0">EN 0 = on</text>
+        <text class="sv-note" x="780" y="222" font-size="12" text-anchor="middle" fill="#bbf7d0">TSSOP-16 on a breakout · used as a gate</text>
+        <rect x="730" y="262" width="100" height="196" rx="6" fill="#0b1630" stroke="#4ade80" stroke-width="1.5"/>
+        <circle cx="742" cy="274" r="4" fill="#4ade80"/>
+        <text class="sv-mono" x="780" y="306" font-size="13" text-anchor="middle">TI</text>
+        <text class="sv-note" x="780" y="336" font-size="11" text-anchor="middle" fill="#bbf7d0">SEL tied 0</text>
+        <text class="sv-note" x="780" y="352" font-size="11" text-anchor="middle" fill="#bbf7d0">→ side A</text>
+        <text class="sv-note" x="780" y="380" font-size="11" text-anchor="middle" fill="#bbf7d0">EN 0 → WBA</text>
+        <text class="sv-note" x="780" y="396" font-size="11" text-anchor="middle" fill="#bbf7d0">connected</text>
+        <text class="sv-note" x="780" y="424" font-size="11" text-anchor="middle" fill="#bbf7d0">EN 1 or no</text>
+        <text class="sv-note" x="780" y="440" font-size="11" text-anchor="middle" fill="#bbf7d0">power → open</text>
         <g class="sv-mono" font-size="12.5">
           <text x="650" y="204">16 VDD</text>
-          <text x="650" y="254">1 SEL</text>
-          <text x="650" y="334">3 S1B</text>
-          <text x="650" y="384">6 S2B</text>
-          <text x="650" y="434">10 S3B</text>
-          <text x="650" y="494">8 GND</text>
+          <text x="650" y="254">15 EN</text>
+          <text x="650" y="334">4 D1</text>
+          <text x="650" y="384">7 D2</text>
+          <text x="650" y="434">9 D3</text>
+          <text x="650" y="494">12 D4</text>
+          <text x="650" y="534">8 GND</text>
         </g>
-        <text class="sv-note" x="650" y="511" font-size="10.5" fill="#bbf7d0">15 EN, 12–14 → GND</text>
         <g class="sv-mono" font-size="12.5" text-anchor="end">
           <text x="910" y="334">S1A 2</text>
           <text x="910" y="384">S2A 5</text>
           <text x="910" y="434">S3A 11</text>
+          <text x="910" y="494">S4A 14</text>
         </g>
-        <g class="sv-mono" font-size="12" text-anchor="middle">
-          <text x="720" y="474">D1·4</text>
-          <text x="780" y="474">D2·7</text>
-          <text x="840" y="474">D3·9</text>
-        </g>
+        <text class="sv-note" x="910" y="534" font-size="10.5" fill="#bbf7d0" text-anchor="end">1 SEL, 3, 6, 10, 13 (B side) → GND</text>
         <g stroke="#e5e7eb" stroke-width="3">
-          <path d="M620 200H640M620 250H640M620 330H640M620 380H640M620 430H640M620 490H640"/>
-          <path d="M920 330H940M920 380H940M920 430H940"/>
-          <path d="M720 530V548M780 530V548M840 530V548"/>
+          <path d="M620 200H640M620 250H640M620 330H640M620 380H640M620 430H640M620 490H640M620 530H640"/>
+          <path d="M920 330H940M920 380H940M920 430H940M920 490H940M920 530H940"/>
         </g>
       </g>
 
-      <!-- ============ MAX98357A ============ -->
+      <!-- ============ PAM8403 ============ -->
       <g>
-        <rect x="640" y="622" width="300" height="200" rx="12" fill="#5b21b6" stroke="#0b1630" stroke-width="3"/>
-        <g class="sv-mono" font-size="12.5" text-anchor="middle">
-          <text x="720" y="646">BCLK</text><text x="780" y="646">LRC</text><text x="840" y="646">DIN</text>
-          <text x="880" y="812">GAIN</text>
-        </g>
+        <rect x="640" y="626" width="300" height="214" rx="12" fill="#7c2d12" stroke="#0b1630" stroke-width="3"/>
+        <text class="sv-title" x="800" y="704" font-size="28" text-anchor="middle">PAM8403</text>
+        <text class="sv-note" x="800" y="726" font-size="11.5" text-anchor="middle" fill="#fed7aa">class-D 2 × 3 W · gain 24 dB</text>
+        <text class="sv-note" x="800" y="744" font-size="11.5" text-anchor="middle" fill="#fed7aa">bridge-tied outputs: never to GND</text>
         <g class="sv-mono" font-size="12.5">
-          <text x="650" y="694">SD</text><text x="650" y="744">GND</text><text x="650" y="784">VIN</text>
+          <text x="650" y="664">+5V</text><text x="650" y="704">GND</text>
+          <text x="650" y="764">L</text><text x="650" y="794">G</text><text x="650" y="824">R</text>
         </g>
         <g class="sv-mono" font-size="12.5" text-anchor="end">
-          <text x="930" y="714">OUT+</text><text x="930" y="754">OUT−</text>
+          <text x="930" y="664">L+</text><text x="930" y="704">L−</text>
+          <text x="930" y="784">R+</text><text x="930" y="814">R−</text>
         </g>
-        <text class="sv-title" x="790" y="716" font-size="26" text-anchor="middle">MAX98357A</text>
-        <text class="sv-note" x="790" y="736" font-size="11.5" text-anchor="middle" fill="#ddd6fe">I2S DAC + class-D, bridge-tied out</text>
-        <text class="sv-note" x="790" y="754" font-size="11.5" text-anchor="middle" fill="#ddd6fe">no MCLK, no codec setup</text>
-        <text class="sv-note" x="772" y="786" font-size="11.5" text-anchor="middle" fill="#ddd6fe">GAIN 100 kΩ to VIN = 3 dB</text>
+        <text class="sv-note" x="880" y="799" font-size="10.5" text-anchor="end" fill="#fed7aa">R: unused, or a 2nd speaker</text>
         <g stroke="#e5e7eb" stroke-width="3">
-          <path d="M720 604V622M780 604V622M840 604V622"/>
-          <path d="M620 690H640M620 740H640M620 780H640"/>
-          <path d="M940 710H960M940 750H960"/>
-          <path d="M880 822V840"/>
+          <path d="M620 660H640M620 700H640M620 760H640M620 790H640M620 820H640"/>
+          <path d="M940 660H960M940 700H960"/>
         </g>
       </g>
 
       <!-- ============ speaker ============ -->
       <g>
-        <circle cx="1084" cy="730" r="50" fill="#1f2937" stroke="#0b1630" stroke-width="4"/>
-        <circle cx="1084" cy="730" r="36" fill="#111827" stroke="#4b5563" stroke-width="3"/>
-        <circle cx="1084" cy="730" r="15" fill="#0b0f1a" stroke="#6b7280" stroke-width="2"/>
-        <circle cx="1079" cy="725" r="4" fill="#e5e7eb"/>
-        <text class="sv-ink" x="1084" y="808" font-size="22" text-anchor="middle">8 Ω · 0.5 W speaker</text>
-        <g stroke="#fff" stroke-width="2"><rect x="1014" y="702" width="18" height="16" rx="3" fill="#e11d48"/><rect x="1014" y="742" width="18" height="16" rx="3" fill="#111827"/></g>
+        <circle cx="1084" cy="680" r="50" fill="#1f2937" stroke="#0b1630" stroke-width="4"/>
+        <circle cx="1084" cy="680" r="36" fill="#111827" stroke="#4b5563" stroke-width="3"/>
+        <circle cx="1084" cy="680" r="15" fill="#0b0f1a" stroke="#6b7280" stroke-width="2"/>
+        <circle cx="1079" cy="675" r="4" fill="#e5e7eb"/>
+        <text class="sv-ink" x="1084" y="758" font-size="22" text-anchor="middle">4 Ω · 3 W speaker</text>
+        <text class="sv-dark" x="1084" y="778" font-size="12" text-anchor="middle">plays the Hindi voice and the music</text>
+        <g stroke="#fff" stroke-width="2"><rect x="1014" y="652" width="18" height="16" rx="3" fill="#e11d48"/><rect x="1014" y="692" width="18" height="16" rx="3" fill="#111827"/></g>
       </g>
 
       <!-- ============ wires ============ -->
-      <!-- +3V3, with its decoupling cap noted at the chip -->
+      <!-- +3V3 to VDD, with its decoupling cap noted at the chip -->
       <path class="wire" stroke="#f97316" d="M392 200H620"/>
-      <text class="sv-dark" x="492" y="189" font-size="11">+ 100 nF to GND at pin 16</text>
-      <!-- SEL with its 100 k pull-down -->
+      <text class="sv-dark" x="486" y="189" font-size="11">+ 100 nF to GND at pin 16</text>
+      <!-- EN with its 10 k pull-up to +3V3 -->
       <path class="wire" stroke="#0891b2" d="M392 250H620"/>
-      <path class="thin" stroke="#0b1630" d="M560 250V258l-7 4 14 6 -14 6 14 6 -14 6 7 4V300M550 300H570M554 305H566M558 310H562"/>
-      <text class="sv-dark" x="574" y="285" font-size="11">100 kΩ</text>
-      <circle cx="560" cy="250" r="4.5" fill="#0b1630"/>
-      <!-- N6 I2S -->
+      <path class="thin" stroke="#0b1630" d="M580 250V242l-7 -4 14 -5 -14 -5 14 -5 -7 -4V200"/>
+      <circle cx="580" cy="250" r="4.5" fill="#0b1630"/>
+      <circle cx="580" cy="200" r="4.5" fill="#0b1630"/>
+      <text class="sv-dark" x="594" y="230" font-size="11">10 kΩ</text>
+      <!-- the WBA's I2S, from the TMUX into the DK -->
       <path class="wire" stroke="#eab308" d="M392 330H620"/>
       <path class="wire" stroke="#16a34a" d="M392 380H620"/>
       <path class="wire" stroke="#2563eb" d="M392 430H620"/>
-      <!-- TMUX ground -->
-      <path class="thin" stroke="#0b1630" d="M620 490H604V500M594 500H614M598 505H610M602 510H606"/>
-      <!-- WBA I2S -->
+      <!-- music line, 100 k pull-down at the DK -->
+      <path class="wire" stroke="#7c3aed" d="M392 490H620"/>
+      <path class="thin" stroke="#0b1630" d="M440 490V498l-7 4 14 6 -14 6 14 6 -14 6 7 4V540M430 540H450M434 545H446M438 550H442"/>
+      <text class="sv-dark" x="454" y="526" font-size="11">100 kΩ</text>
+      <circle cx="440" cy="490" r="4.5" fill="#0b1630"/>
+      <!-- TMUX grounds: pin 8 and the B side -->
+      <path class="thin" stroke="#0b1630" d="M620 530H604V540M594 540H614M598 545H610M602 550H606"/>
+      <path class="thin" stroke="#0b1630" d="M940 530H956V540M946 540H966M950 545H962M954 550H958"/>
+      <!-- WBA side -->
       <path class="wire dash" stroke="#eab308" d="M1208 330H940"/>
       <path class="wire dash" stroke="#16a34a" d="M1208 380H940"/>
       <path class="wire dash" stroke="#2563eb" d="M1208 430H940"/>
-      <!-- switched I2S to the amplifier -->
-      <path class="wire fat" stroke="#eab308" d="M720 548V604"/>
-      <path class="wire fat" stroke="#16a34a" d="M780 548V604"/>
-      <path class="wire fat" stroke="#2563eb" d="M840 548V604"/>
-      <!-- music line (hops over crossings), 100 k pull-down at the DK -->
-      <path class="wire" stroke="#7c3aed" d="M1208 590H850a10 10 0 0 0 -20 0H790a10 10 0 0 0 -20 0H730a10 10 0 0 0 -20 0H530a10 10 0 0 0 -20 0H392"/>
-      <path class="thin" stroke="#0b1630" d="M440 590V598l-7 4 14 6 -14 6 14 6 -14 6 7 4V640M430 640H450M434 645H446M438 650H442"/>
-      <text class="sv-dark" x="454" y="626" font-size="11">100 kΩ</text>
-      <circle cx="440" cy="590" r="4.5" fill="#0b1630"/>
-      <!-- amp SD: open-drain through 1 k; optional 1 M from VIN -->
-      <path class="wire" stroke="#db2777" d="M392 520H520V690H548"/>
-      <path class="thin" stroke="#db2777" d="M548 690l4 -7 6 14 6 -14 6 14 6 -14 6 14 4 -7H620"/>
-      <text class="sv-dark" x="567" y="675" font-size="11" text-anchor="middle">1 kΩ</text>
-      <path class="thin" stroke="#0b1630" stroke-dasharray="5 4" d="M598 690V716l-7 4 14 6 -14 6 14 6 -14 6 7 4V780"/>
-      <circle cx="598" cy="690" r="4.5" fill="#0b1630"/>
-      <circle cx="598" cy="780" r="4.5" fill="#0b1630"/>
-      <text class="sv-dark" x="586" y="726" font-size="11" text-anchor="end">1 MΩ only if</text>
-      <text class="sv-dark" x="586" y="740" font-size="11" text-anchor="end">SD reads 0 V</text>
-      <!-- +5 V from the DK to VIN, and the GAIN resistor to VIN -->
-      <path class="wire" stroke="#e11d48" d="M392 780H620"/>
-      <path class="thin" stroke="#e11d48" d="M880 840V870H720l-4 -7 -6 14 -6 -14 -6 14 -6 -14 -6 14 -4 -7H560V780"/>
-      <circle cx="560" cy="780" r="4.5" fill="#0b1630"/>
-      <text class="sv-alert" x="701" y="896" font-size="12" text-anchor="middle">100 kΩ GAIN → VIN = 3 dB (required)</text>
-      <!-- grounds (every symbol is the same net) -->
-      <path class="thin" stroke="#0b1630" d="M620 740H626V750M616 750H636M620 755H632M624 760H628"/>
-      <path class="thin" stroke="#0b1630" d="M392 720H410V734M400 734H420M404 739H416M408 744H412"/>
+      <path class="wire dash" stroke="#7c3aed" d="M1208 490H940"/>
+      <!-- +5 V and GND to the PAM8403, 470 uF across them at the module -->
+      <path class="wire" stroke="#e11d48" d="M392 660H510a10 10 0 0 1 20 0H620"/>
+      <path class="wire" stroke="#111827" d="M392 580H520V700H620"/>
+      <path class="thin" stroke="#0b1630" d="M560 660V672M546 672H574M546 684q14 -8 28 0M560 680V700"/>
+      <circle cx="560" cy="660" r="4.5" fill="#0b1630"/>
+      <circle cx="560" cy="700" r="4.5" fill="#0b1630"/>
+      <text class="sv-dark" x="539" y="676" font-size="13" text-anchor="end" font-weight="600">+</text>
+      <text class="sv-alert" x="560" y="728" font-size="12" text-anchor="middle">470 µF ≥ 16 V</text>
+      <text class="sv-alert" x="560" y="743" font-size="12" text-anchor="middle">at the PAM8403</text>
+      <!-- the jack: a 3.5 mm plug cable, fanned out to L, G, R -->
+      <path class="wire fat" stroke="#4b5563" d="M386 734H470V790H500"/>
+      <path class="wire" stroke="#db2777" d="M500 790V760H620"/>
+      <path class="wire" stroke="#111827" d="M500 790H620"/>
+      <path class="wire" stroke="#0d9488" d="M500 790V820H620"/>
+      <circle cx="500" cy="790" r="6" fill="#4b5563"/>
+      <text class="sv-dark" x="508" y="852" font-size="11.5">3.5 mm plug: tip = L, ring = R, sleeve = G</text>
+      <!-- DK ground symbol, WBA ground -->
       <path class="thin" stroke="#0b1630" d="M1208 660H1180V670M1170 670H1190M1174 675H1186M1178 680H1182"/>
       <text class="sv-dark" x="1180" y="700" font-size="11" text-anchor="middle">⏚ = one net</text>
       <!-- speaker -->
-      <path class="wire" stroke="#e11d48" d="M960 710H1014"/>
-      <path class="wire" stroke="#111827" d="M960 750H1014"/>
+      <path class="wire" stroke="#e11d48" d="M960 660H1014"/>
+      <path class="wire" stroke="#111827" d="M960 700H1014"/>
 
       <!-- ============ numbered markers (wiring order) ============ -->
       <g class="marker">
-        <g><circle cx="470" cy="200" r="13"/><text x="470" y="200">1</text></g>
-        <g><circle cx="444" cy="722" r="13"/><text x="444" y="722">2</text></g>
-        <g><circle cx="470" cy="780" r="13"/><text x="470" y="780">3</text></g>
-        <g><circle cx="470" cy="330" r="13"/><text x="470" y="330">4</text></g>
-        <g><circle cx="470" cy="380" r="13"/><text x="470" y="380">5</text></g>
-        <g><circle cx="470" cy="430" r="13"/><text x="470" y="430">6</text></g>
-        <g><circle cx="1110" cy="330" r="13"/><text x="1110" y="330">7</text></g>
-        <g><circle cx="1110" cy="380" r="13"/><text x="1110" y="380">8</text></g>
-        <g><circle cx="1110" cy="430" r="13"/><text x="1110" y="430">9</text></g>
-        <g><circle cx="884" cy="566" r="13"/><text x="884" y="566">10</text></g>
-        <g><circle cx="470" cy="250" r="13"/><text x="470" y="250">11</text></g>
-        <g><circle cx="470" cy="520" r="13"/><text x="470" y="520">12</text></g>
-        <g><circle cx="1110" cy="590" r="13"/><text x="1110" y="590">13</text></g>
-        <g><circle cx="800" cy="870" r="13"/><text x="800" y="870">14</text></g>
-        <g><circle cx="987" cy="688" r="13"/><text x="987" y="688">15</text></g>
+        <g><circle cx="440" cy="200" r="13"/><text x="440" y="200">1</text></g>
+        <g><circle cx="470" cy="580" r="13"/><text x="470" y="580">2</text></g>
+        <g><circle cx="470" cy="250" r="13"/><text x="470" y="250">3</text></g>
+        <g><circle cx="510" cy="330" r="13"/><text x="510" y="330">4</text></g>
+        <g><circle cx="510" cy="380" r="13"/><text x="510" y="380">5</text></g>
+        <g><circle cx="510" cy="430" r="13"/><text x="510" y="430">6</text></g>
+        <g><circle cx="510" cy="490" r="13"/><text x="510" y="490">7</text></g>
+        <g><circle cx="1110" cy="330" r="13"/><text x="1110" y="330">8</text></g>
+        <g><circle cx="1110" cy="380" r="13"/><text x="1110" y="380">9</text></g>
+        <g><circle cx="1110" cy="430" r="13"/><text x="1110" y="430">10</text></g>
+        <g><circle cx="1110" cy="490" r="13"/><text x="1110" y="490">11</text></g>
+        <g><circle cx="450" cy="660" r="13"/><text x="450" y="660">12</text></g>
+        <g><circle cx="430" cy="734" r="13"/><text x="430" y="734">13</text></g>
+        <g><circle cx="987" cy="640" r="13"/><text x="987" y="640">14</text></g>
       </g>
     </svg>
   </figure>
 
-  <div class="panel" style="border-color:#10b981;background:#042f2e;color:#ecfdf5;margin-bottom:10px;">
-    <h3 style="color:#34d399;font-size:22px;">&#9733; Hindi Speech Output (On-the-fly Translation): 3.5 mm Jack + PAM8403</h3>
-    <p>For on-the-fly spoken Hindi output, audio routes from the STM32N6570-DK onboard <strong>3.5 mm audio jack</strong> into an external <strong>PAM8403</strong> Class-D amplifier driving a <strong>4 &Omega; 3 W speaker</strong>:</p>
-    <ul style="color:#d1fae5;">
-      <li><strong>Audio Input:</strong> 3.5 mm jack Left/Right channel &rarr; PAM8403 <code>L_IN</code> (or <code>R_IN</code>), Ground sleeve &rarr; PAM8403 <code>GND</code>.</li>
-      <li><strong>Power (+5V & GND):</strong> PAM8403 <code>+5V</code> &rarr; DK <code>CN8 pin 5</code> (+5V), PAM8403 <code>GND</code> &rarr; DK <code>CN8 pin 6</code> (GND).</li>
-      <li><strong>470 &mu;F Capacitor (Required):</strong> Connect a <strong>470 &mu;F electrolytic capacitor</strong> directly across PAM8403 <code>+5V</code> and <code>GND</code> close to the amplifier to eliminate switching ripple, pops, and 5V rail sags.</li>
-      <li><strong>Speaker:</strong> Connect the <strong>4 &Omega; 3 W speaker</strong> across PAM8403 <code>OUT+</code> and <code>OUT&minus;</code>. <em>(BTL output: never connect either speaker terminal to ground!)</em></li>
-    </ul>
+  <div class="panel warn">
+    <h3>Before you wire: flash the new firmware first</h3>
+    <p>The old firmware drives A2, D6 and D8 as outputs (it sent the Hindi voice out on them) and drives D7 for the old SEL. With the WBA connected, both boards would then drive the same lines. Flash the firmware from branch <code>claude/peaceful-mccarthy-gdlqoe</code> (commit "Translator audio: Hindi voice and WBA music both out of the DK's 3.5 mm jack" or later) before steps 3 to 11. The new firmware makes A2, D6 and D8 inputs and only then pulls D7 low; until then the 10 kΩ pull-up keeps the TMUX open.</p>
   </div>
 
   <div>
     <h2>Wire it in this order</h2>
-    <p class="sub">Numbers match the red markers on the drawing. Keep both USB cables unplugged while wiring, and check the grounds, the 5 V line and the GAIN resistor before you power up.</p>
+    <p class="sub">Numbers match the red markers on the drawing. Keep both USB cables unplugged while wiring, and check the grounds, the 5 V line and the capacitor's polarity before you power up. The TMUX1574PWR is a TSSOP-16 chip: solder it on a TSSOP-16 to DIP adapter first (0.65 mm pitch), pin 1 at the dot.</p>
   </div>
-
-  <section class="cards" aria-label="Connections in wiring order">
+  <section class="cards">
     <article class="card" style="--c:#f97316"><h3><span class="num">1</span>+3V3 → TMUX VDD</h3><p>DK <code>CN8 pin 4</code> → TMUX <code>pin 16</code>. Solder a 100 nF ceramic from pin 16 to pin 8, right at the chip.</p></article>
-    <article class="card" style="--c:#e5e7eb"><h3><span class="num">2</span>Common ground</h3><p>Join DK <code>CN8 pin 6</code>, TMUX <code>pin 8</code>, MAX <code>GND</code> and Nucleo <code>CN5 pin 6</code>. Also tie TMUX <code>pins 12–15</code> to ground (EN low = always on; channel 4 unused). Every ⏚ is this one net.</p></article>
-    <article class="card" style="--c:#e11d48"><h3><span class="num">3</span>DK +5V → MAX VIN</h3><p>DK <code>CN8 pin 5</code> (the board's 5 V output) → MAX <code>VIN</code>. No battery or separate supply: the speaker adds at most about 0.1 A. A 100 µF capacitor across VIN and GND at the module is optional.</p></article>
-    <article class="card" style="--c:#eab308"><h3><span class="num">4</span>A2 = PE12 → S1B</h3><p>N6 bit clock, <code>SAI2_SCK_B</code>, AF10. DK <code>CN7 pin 3</code> → TMUX <code>pin 3</code>. 48 kHz × 32 bits = 1.536 MHz.</p></article>
-    <article class="card" style="--c:#16a34a"><h3><span class="num">5</span>D6 = PE13 → S2B</h3><p>N6 word select, <code>SAI2_FS_B</code>. DK <code>CN11 pin 7</code> → TMUX <code>pin 6</code>. Low = left slot, high = right slot.</p></article>
-    <article class="card" style="--c:#2563eb"><h3><span class="num">6</span>D8 = PE7 → S3B</h3><p>N6 data, <code>SAI2_SD_B</code>, I2S Philips, 16-bit. DK <code>CN12 pin 1</code> → TMUX <code>pin 10</code>. Both slots carry the same mono sample.</p></article>
-    <article class="card" style="--c:#eab308"><h3><span class="num">7</span>PB6 → S1A (dashed)</h3><p>WBA bit clock, <code>SAI1_SCK_B</code>. Nucleo <code>CN8 pin 4</code> ("D3") → TMUX <code>pin 2</code>. PB6 is also user button B2.</p></article>
-    <article class="card" style="--c:#16a34a"><h3><span class="num">8</span>PB5 → S2A (dashed)</h3><p>WBA word select, <code>SAI1_FS_B</code>. Nucleo morpho <code>CN4 pin 35</code> → TMUX <code>pin 5</code>. Arduino D1 would need a solder bridge, so use the morpho pin.</p></article>
-    <article class="card" style="--c:#2563eb"><h3><span class="num">9</span>PB7 → S3A (dashed)</h3><p>WBA data, <code>SAI1_SD_B</code>. Nucleo <code>CN8 pin 3</code> ("D2") → TMUX <code>pin 11</code>. PB7 is also user button B3. ST's own LE Audio example uses these three pins.</p></article>
-    <article class="card" style="--c:#c4b5fd"><h3><span class="num">10</span>TMUX → MAX I2S</h3><p>TMUX <code>pin 4</code> → <code>BCLK</code>, <code>pin 7</code> → <code>LRC</code>, <code>pin 9</code> → <code>DIN</code>. Keep these three short. Go by the names on your module's silkscreen; its pin order may differ from the drawing.</p></article>
-    <article class="card" style="--c:#0891b2"><h3><span class="num">11</span>D7 = PD6 → SEL</h3><p>DK <code>CN11 pin 8</code> → TMUX <code>pin 1</code>, with 100 kΩ to ground. Low = side A = WBA music, which is also the state while the N6 sleeps. High = side B = N6.</p></article>
-    <article class="card" style="--c:#db2777"><h3><span class="num">12</span>D4 = PH5 → 1 <span class="u">kΩ</span> → SD</h3><p>DK <code>CN11 pin 5</code>, open-drain. Pulled low, the amplifier is off for about 40 ms around each switch. Released, the module's own bias gives the (L+R)/2 mix. Measure SD first: 0.4–0.5 V is right; about 0 V means add 1 MΩ from VIN to SD.</p></article>
-    <article class="card" style="--c:#a78bfa"><h3><span class="num">13</span>PB0 → D2 = PD0</h3><p>Nucleo <code>CN8 pin 7</code> ("D6") → DK <code>CN11 pin 3</code>, with 100 kΩ to ground at the DK. The WBA holds it high while music plays; the N6 hands over the speaker and sleeps.</p></article>
-    <article class="card must" style="--c:#f5b301"><h3><span class="num">14</span>GAIN → 100 <span class="u">kΩ</span> → VIN</h3><p>Required for the 0.5 W speaker. It sets 3 dB: a full-scale sine is 1.8 Vrms, 0.40 W into 8 Ω. Left open (9 dB), the same sine is 1.6 W, three times the speaker's rating. The N6 firmware also lowers its own output by 3 dB.</p></article>
-    <article class="card" style="--c:#fca5a5"><h3><span class="num">15</span>Speaker 8 Ω · 0.5 W</h3><p>MAX <code>OUT+</code> / <code>OUT−</code> screw terminal → speaker. The output is bridge-tied: never connect either speaker wire to ground, to the USB shield, or to another amplifier.</p></article>
+    <article class="card" style="--c:#e5e7eb"><h3><span class="num">2</span>Common ground</h3><p>Join DK <code>CN8 pin 6</code>, TMUX <code>pin 8</code>, PAM8403 <code>GND</code> and Nucleo <code>CN5 pin 6</code>. Also tie TMUX <code>pin 1</code> (SEL: always side A) and the unused B side, <code>pins 3, 6, 10, 13</code>, to ground. Every ⏚ is this one net.</p></article>
+    <article class="card" style="--c:#0891b2"><h3><span class="num">3</span>D7 = PD6 → EN</h3><p>DK <code>CN11 pin 8</code> → TMUX <code>pin 15</code>, and 10 kΩ from pin 15 to <code>+3V3</code> (pin 16). EN is active low: the pull-up keeps the switch open until the firmware pulls D7 low. With the DK off, the chip's powered-off protection keeps it open too.</p></article>
+    <article class="card" style="--c:#eab308"><h3><span class="num">4</span>D1 → A2 = PE12</h3><p>TMUX <code>pin 4</code> → DK <code>CN7 pin 3</code>: the WBA's bit clock into <code>SAI2_SCK_B</code>, AF10. 48 kHz × 32 bits = 1.536 MHz. Keep the three I2S wires short.</p></article>
+    <article class="card" style="--c:#16a34a"><h3><span class="num">5</span>D2 → D6 = PE13</h3><p>TMUX <code>pin 7</code> → DK <code>CN11 pin 7</code>: word select into <code>SAI2_FS_B</code>. Low = left slot, high = right slot.</p></article>
+    <article class="card" style="--c:#2563eb"><h3><span class="num">6</span>D3 → D8 = PE7</h3><p>TMUX <code>pin 9</code> → DK <code>CN12 pin 1</code>: data into <code>SAI2_SD_B</code>, I2S Philips, 16-bit. The DK mixes left and right into one channel.</p></article>
+    <article class="card" style="--c:#a78bfa"><h3><span class="num">7</span>D4 → D2 = PD0</h3><p>TMUX <code>pin 12</code> → DK <code>CN11 pin 3</code>, with 100 kΩ to ground at the DK: the "music playing" line. With the switch open it reads low: no music.</p></article>
+    <article class="card" style="--c:#eab308"><h3><span class="num">8</span>PB6 → S1A (dashed)</h3><p>WBA bit clock, <code>SAI1_SCK_B</code>. Nucleo <code>CN8 pin 4</code> ("D3") → TMUX <code>pin 2</code>. PB6 is also user button B2.</p></article>
+    <article class="card" style="--c:#16a34a"><h3><span class="num">9</span>PB5 → S2A (dashed)</h3><p>WBA word select, <code>SAI1_FS_B</code>. Nucleo morpho <code>CN4 pin 35</code> → TMUX <code>pin 5</code>. Arduino D1 would need a solder bridge, so use the morpho pin.</p></article>
+    <article class="card" style="--c:#2563eb"><h3><span class="num">10</span>PB7 → S3A (dashed)</h3><p>WBA data, <code>SAI1_SD_B</code>. Nucleo <code>CN8 pin 3</code> ("D2") → TMUX <code>pin 11</code>. PB7 is also user button B3. ST's own LE Audio example uses these three pins.</p></article>
+    <article class="card" style="--c:#a78bfa"><h3><span class="num">11</span>PB0 → S4A (dashed)</h3><p>Nucleo <code>CN8 pin 7</code> ("D6") → TMUX <code>pin 14</code>. The WBA holds it high while music plays; the DK then plays the music and the translator pauses.</p></article>
+    <article class="card must" style="--c:#e11d48"><h3><span class="num">12</span>+5V, GND, 470 <span class="u">µF</span> → PAM8403</h3><p>DK <code>CN8 pin 5</code> (+5 V) → PAM8403 <code>+5V</code>, ground → its <code>GND</code>. Solder the 470 µF electrolytic (16 V or more) straight across the module's +5V and GND pins: the long leg / unmarked side to +5V, the stripe to GND. It feeds the amplifier's current peaks so the DK's 5 V does not dip.</p></article>
+    <article class="card" style="--c:#db2777"><h3><span class="num">13</span>Jack → PAM8403 input</h3><p>A 3.5 mm plug into the DK's audio jack, its wires to the PAM8403 input: tip → <code>L</code>, ring → <code>R</code>, sleeve → <code>G</code> (input ground). Both channels carry the same signal. Keep this cable away from the speaker wires.</p></article>
+    <article class="card" style="--c:#fca5a5"><h3><span class="num">14</span>Speaker 4 Ω · 3 W</h3><p>PAM8403 <code>L+</code> and <code>L−</code> → the speaker's two terminals. The outputs are bridge-tied: never connect a speaker wire to ground, to the other channel or to the USB shield. A second 4 Ω speaker may go on <code>R+</code> / <code>R−</code>.</p></article>
   </section>
 
   <section class="grid2">
@@ -390,96 +382,97 @@ footer.chain code { font-family: var(--mono); font-size: 12.5px; color: #fff; }
           <text class="sv-mono" x="320" y="186" font-size="15" text-anchor="middle">TMUX1574</text>
           <text class="sv-note" x="320" y="206" font-size="11.5" text-anchor="middle">TSSOP-16</text>
           <g stroke-width="7" stroke-linecap="round">
-            <path d="M226 48H250" stroke="#0891b2"/>
+            <path d="M226 48H250" stroke="#e5e7eb"/>
             <path d="M226 84H250" stroke="#eab308" stroke-dasharray="5 4"/>
-            <path d="M226 120H250" stroke="#eab308"/>
+            <path d="M226 120H250" stroke="#e5e7eb"/>
             <path d="M226 156H250" stroke="#eab308"/>
             <path d="M226 192H250" stroke="#16a34a" stroke-dasharray="5 4"/>
-            <path d="M226 228H250" stroke="#16a34a"/>
+            <path d="M226 228H250" stroke="#e5e7eb"/>
             <path d="M226 264H250" stroke="#16a34a"/>
             <path d="M226 300H250" stroke="#e5e7eb"/>
             <path d="M390 48H414" stroke="#f97316"/>
-            <path d="M390 84H414" stroke="#e5e7eb"/>
-            <path d="M390 120H414" stroke="#e5e7eb"/>
+            <path d="M390 84H414" stroke="#0891b2"/>
+            <path d="M390 120H414" stroke="#7c3aed" stroke-dasharray="5 4"/>
             <path d="M390 156H414" stroke="#e5e7eb"/>
-            <path d="M390 192H414" stroke="#e5e7eb"/>
+            <path d="M390 192H414" stroke="#7c3aed"/>
             <path d="M390 228H414" stroke="#2563eb" stroke-dasharray="5 4"/>
-            <path d="M390 264H414" stroke="#2563eb"/>
+            <path d="M390 264H414" stroke="#e5e7eb"/>
             <path d="M390 300H414" stroke="#2563eb"/>
           </g>
           <g class="sv-mono" font-size="12.5" text-anchor="end">
-            <text x="216" y="52">1 SEL ← DK D7</text>
+            <text x="216" y="52">1 SEL → GND</text>
             <text x="216" y="88">2 S1A ← WBA PB6</text>
-            <text x="216" y="124">3 S1B ← DK A2</text>
-            <text x="216" y="160">4 D1 → MAX BCLK</text>
+            <text x="216" y="124">3 S1B → GND</text>
+            <text x="216" y="160">4 D1 → DK A2</text>
             <text x="216" y="196">5 S2A ← WBA PB5</text>
-            <text x="216" y="232">6 S2B ← DK D6</text>
-            <text x="216" y="268">7 D2 → MAX LRC</text>
+            <text x="216" y="232">6 S2B → GND</text>
+            <text x="216" y="268">7 D2 → DK D6</text>
             <text x="216" y="304">8 GND</text>
           </g>
           <g class="sv-mono" font-size="12.5">
             <text x="424" y="52">16 VDD ← +3V3</text>
-            <text x="424" y="88">15 EN → GND</text>
-            <text x="424" y="124">14 S4A → GND</text>
+            <text x="424" y="88">15 EN ← DK D7, 10k↑</text>
+            <text x="424" y="124">14 S4A ← WBA PB0</text>
             <text x="424" y="160">13 S4B → GND</text>
-            <text x="424" y="196">12 D4 → GND</text>
+            <text x="424" y="196">12 D4 → DK D2</text>
             <text x="424" y="232">11 S3A ← WBA PB7</text>
-            <text x="424" y="268">10 S3B ← DK D8</text>
-            <text x="424" y="304">9 D3 → MAX DIN</text>
+            <text x="424" y="268">10 S3B → GND</text>
+            <text x="424" y="304">9 D3 → DK D8</text>
           </g>
         </svg>
       </div>
-      <p>Pin 1 is next to the dot. Check this against your breakout's silkscreen before soldering the header pins; TI's data sheet gives this order for the TSSOP (PW) package.</p>
+      <p>Pin 1 is next to the dot. TI's data sheet (SCDS391C, Pin Functions) gives this order for the TSSOP (PW) package; check it against your adapter board's silkscreen before soldering header pins.</p>
     </div>
 
     <div class="panel">
-      <h3>How the switch decides</h3>
+      <h3>What the TMUX does here</h3>
       <table>
-        <thead><tr><th>EN</th><th>SEL (D7)</th><th>Speaker plays</th></tr></thead>
+        <thead><tr><th>EN (D7)</th><th>DK</th><th>WBA lines</th></tr></thead>
         <tbody>
-          <tr><td class="mono">0</td><td class="mono">0</td><td>WBA Bluetooth music (side A). Hardware default.</td></tr>
-          <tr><td class="mono">0</td><td class="mono">1</td><td>N6 translator (side B)</td></tr>
-          <tr><td class="mono">1</td><td class="mono">x</td><td>Nothing: all switches off (EN is tied low here)</td></tr>
+          <tr><td class="mono">1</td><td>reset, booting, old firmware (10 kΩ pull-up)</td><td>disconnected</td></tr>
+          <tr><td class="mono">0</td><td>new firmware, receive pins set as inputs</td><td>connected to A2, D6, D8, D2</td></tr>
+          <tr><td class="mono">—</td><td>DK unpowered (TMUX VDD = 0 V)</td><td>disconnected (powered-off protection, up to 3.6 V)</td></tr>
         </tbody>
       </table>
-      <h3>AUTO mode on the N6</h3>
+      <h3>What the speaker plays</h3>
       <ul>
-        <li>Music line high for 0.1 s: amp muted, SEL low, amp back on. The N6 pauses recognition and its own I2S, and the screen goes dark after 5 s.</li>
-        <li>Music line low for 1.5 s: the N6 wakes, SEL goes high, and two short beeps confirm the speaker path.</li>
-        <li>A tap or the USER button lights the screen for 10 s. TRANSLATE and MUSIC force one side. TONE plays 880 Hz.</li>
+        <li>AUTO (default): the music while the WBA's line is high (after 0.1 s), the Hindi voice otherwise (1.5 s after the music stops; two short beeps).</li>
+        <li>Music always wins: speech fades out within 5 ms, the translation stops, and the screen goes dark after 5 s.</li>
+        <li>TRANSLATE and MUSIC force one source. TONE plays 880 Hz through the jack.</li>
       </ul>
     </div>
 
     <div class="panel warn">
-      <h3>Speaker power at 5 V, 8 Ω</h3>
+      <h3>Loudness: jack → PAM8403 → 4 Ω</h3>
       <table>
-        <thead><tr><th>GAIN pin</th><th>Gain</th><th>Full-scale sine</th></tr></thead>
+        <thead><tr><th>Stage</th><th>Level</th><th>Note</th></tr></thead>
         <tbody>
-          <tr><td class="mono">100 kΩ to VIN</td><td class="mono">3 dB</td><td>1.8 Vrms = 0.40 W. <strong>Use this.</strong></td></tr>
-          <tr><td class="mono">VIN</td><td class="mono">6 dB</td><td>2.5 Vrms = 0.81 W: too much</td></tr>
-          <tr><td class="mono">open</td><td class="mono">9 dB</td><td>3.6 Vrms ≈ 1.6 W: too much</td></tr>
+          <tr><td>WM8904 headphone volume</td><td class="mono">−14 dB</td><td>full-scale sine ≈ 0.2 Vrms at the jack (<code>XL_AUDIO_OUT_VOLUME_DB</code>)</td></tr>
+          <tr><td>PAM8403 gain</td><td class="mono">24 dB</td><td>× 15.8 → ≈ 3.2 Vrms ≈ 2.5 W into 4 Ω, where it starts to clip at 5 V</td></tr>
+          <tr><td>Hindi voice</td><td class="mono">−3 dB more</td><td>its peaks stay under the clip (<code>XL_AUDIO_OUT_CEILING_Q15</code>)</td></tr>
         </tbody>
       </table>
-      <p>Full scale is 2.1 dBV plus the gain (MAX98357A data sheet). The N6 adds a −3 dB cap (<code>XL_AUDIO_OUT_CEILING_Q15</code>), so its speech and beeps stay well under 0.5 W. The WBA music gets the same cap when its firmware is ported. Until then, the GAIN resistor is what protects the speaker.</p>
+      <p>Average power is far below the 3 W rating. If the sound distorts, or the DK resets on loud music, rebuild with <code>-DXL_AUDIO_OUT_VOLUME_DB=-20</code> or turn the module's knob down if it has one.</p>
     </div>
 
     <div class="panel warn">
       <h3>Safety and power</h3>
       <ul>
-        <li>The MAX98357A drives both speaker terminals with fast PWM. Shorting either one to ground can destroy it.</li>
-        <li>Power the DK by USB-C on <code>CN6</code> from a USB-C port or charger. UM3300: the board can then draw 1.66 or 3.2 A. An old USB-A port can limit it to 0.55 A.</li>
+        <li>The PAM8403 drives both terminals of each speaker with fast PWM. Shorting either one to ground, or L to R, can destroy it.</li>
+        <li>The 470 µF capacitor is polarized: the stripe goes to GND. Reversed, it can burst.</li>
+        <li>Power the DK by USB-C on <code>CN6</code> from a USB-C port or charger. UM3300: the board can then draw 1.66 or 3.2 A. An old USB-A port can limit it to 0.55 A, too little for loud music.</li>
         <li>The Nucleo runs from its own ST-LINK USB cable. Its ground still joins the common ground.</li>
-        <li>The DK and Nucleo pins are 3.3 V. Never put 5 V on a header signal pin.</li>
+        <li>The DK, Nucleo and TMUX signal pins are 3.3 V. Never put 5 V on a header signal pin.</li>
       </ul>
     </div>
 
     <div class="panel">
       <h3>Pins avoided, and why</h3>
       <ul>
-        <li><code>PD12</code> on the DK is the Ethernet chip's MDIO line, so SEL is on <code>D7 = PD6</code>.</li>
+        <li><code>PD12</code> on the DK is the Ethernet chip's MDIO line, so EN is on <code>D7 = PD6</code>.</li>
         <li><code>PA8</code> on the Nucleo is the ST-LINK virtual COM port's RX line, so the WBA uses SAI1 block B instead of block A.</li>
-        <li>SD tied straight to 3.3 V selects the left channel only, and music would lose its right channel. SD is biased for the (L+R)/2 mix instead.</li>
-        <li>Stereo later: a second MAX98357A on the same BCLK, LRC and DIN lines, one set to left (SD above 1.4 V) and one to right (0.77–1.4 V). Each needs its own 8 Ω speaker and GAIN resistor. Both can run from the DK's 5 V.</li>
+        <li>The DK's codec sits on <code>PB0, PB6, PB7, PG7</code> (SAI1 block A) and <code>I2C2</code> (shared with the touch screen): on-board, nothing to wire.</li>
+        <li>No MAX98357A any more: the old <code>D4 = PH5</code> amplifier-shutdown wire is not used.</li>
       </ul>
     </div>
   </section>
@@ -487,7 +480,7 @@ footer.chain code { font-family: var(--mono); font-size: 12.5px; color: #fff; }
 
 <footer class="chain">
   <div class="wrap">
-    <p><strong>Signal chain:</strong> N6 SAI2_B (A2 / D6 / D8) and WBA SAI1_B (PB6 / PB5 / PB7) → TMUX1574 (SEL = D7) → MAX98357A (SD = D4, GAIN 3 dB) → 8 Ω 0.5 W speaker. Music line: Nucleo PB0 → DK PD0. Power: DK USB-C → CN8 pin 5 (+5 V) → amplifier; Nucleo on its own USB.</p>
-    <p><strong>Sources:</strong> STM32N6570-DK user manual UM3300, Table 5, section 7.4 and Table 16 · NUCLEO-WBA55CG user manual UM3301, Tables 8, 11, 14, 15 · TI TMUX1574 data sheet, pin functions and truth table · MAX98357A data sheet, gain (relative to 2.1 dBV) and SD_MODE thresholds · STM32CubeMX pin database · ST BLE_Audio_TMAP_Peripheral example (SAI1 on PB6 / PB5 / PB7) · firmware <code>src/application/translator</code>.</p>
+    <p><strong>Signal chain:</strong> phone → WBA (LC3 decode) → WBA SAI1_B (PB6 / PB5 / PB7) → TMUX1574 side A (EN = D7, SEL = GND) → DK SAI2_B (A2 / D6 / D8) → DK audio stream ← N6 Hindi voice; → SAI1_A → WM8904 → 3.5 mm jack → PAM8403 (470 µF at its 5 V input) → 4 Ω 3 W speaker. Music line: Nucleo PB0 → TMUX → DK PD0. Power: DK USB-C → CN8 pin 5 (+5 V) → PAM8403; Nucleo on its own USB.</p>
+    <p><strong>Sources:</strong> STM32N6570-DK user manual UM3300 and ST's BSP (WM8904 on SAI1 block A: PG7, PB6, PB7, PB0, I2C2 address 0x34) · NUCLEO-WBA55CG user manual UM3301 · TI TMUX1574 data sheet SCDS391C (pin functions, active-low EN, powered-off protection) · Diodes PAM8403 data sheet (24 dB gain, 3 W into 4 Ω at 5 V, BTL outputs) · ST BLE_Audio_TMAP_Peripheral example (SAI1 on PB6 / PB5 / PB7) · firmware <code>src/application/translator</code> (<code>xl_audio_out.c</code>, <code>xl_router.c</code>).</p>
   </div>
 </footer>

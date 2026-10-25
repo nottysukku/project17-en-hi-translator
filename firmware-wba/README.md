@@ -1,9 +1,14 @@
 # NUCLEO-WBA55CG music receiver (Project 17)
 
 A phone with Bluetooth LE Audio streams music to the NUCLEO-WBA55CG. The Nucleo decodes it (LC3)
-and plays it through the shared MAX98357A amplifier and 8 Ω speaker, via side A of the TMUX1574
-switch. While music plays it holds a line high, so the STM32N6570-DK translator hands over the
-speaker and sleeps.
+and sends it as I2S, through side A of a TMUX1574 switch, to the STM32N6570-DK, which plays it on
+its 3.5 mm jack (PAM8403, 4 Ω 3 W speaker) instead of the translator's voice. While music plays it
+holds a line high, so the translator hands over the speaker and sleeps. Wiring:
+`firmware-n6/src/application/translator/README.md`.
+
+The I2S output was written for a MAX98357A, which is no longer used; the signals are the same for
+the DK's receiver, so nothing here changed (the names `BOARD_NUCLEO_MAX98357A` and the volume note
+below still say MAX98357A).
 
 This is ST's `BLE_Audio_TMAP_Peripheral` example for the STM32WBA55G-DK1 (STM32CubeWBA, commit
 4ccfd152), ported to the Nucleo. The first commit is ST's code unchanged, so `git diff` against it
