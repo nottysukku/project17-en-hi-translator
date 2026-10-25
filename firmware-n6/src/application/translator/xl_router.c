@@ -13,20 +13,17 @@
 
 #include "logger.h"
 #include "stm32n6xx_hal.h"
+#include "xl_audio_out.h"
 
 /*******************************************************************************/
 /*                               PRIVATE DEFINES                               */
 /*******************************************************************************/
 
-/** @brief TMUX1574 SEL: Arduino D7. */
-#define XL_SEL_PORT GPIOD
-#define XL_SEL_PIN  GPIO_PIN_6
+/** @brief TMUX1574 EN (active low): Arduino D7. */
+#define XL_TMUX_EN_PORT GPIOD
+#define XL_TMUX_EN_PIN  GPIO_PIN_6
 
-/** @brief MAX98357A SD (shutdown), open-drain: Arduino D4. */
-#define XL_AMP_SD_PORT GPIOH
-#define XL_AMP_SD_PIN  GPIO_PIN_5
-
-/** @brief WBA "music playing" line: Arduino D2. */
+/** @brief WBA "music playing" line, through the TMUX: Arduino D2. */
 #define XL_MUSIC_PORT GPIOD
 #define XL_MUSIC_PIN  GPIO_PIN_0
 
@@ -36,21 +33,6 @@
 /** @brief ... and low this long before it counts as stopped (gaps between songs). */
 #define XL_MUSIC_OFF_MS 1500U
 
-/** @brief Amplifier muted this long before and after SEL changes. */
-#define XL_SWITCH_MUTE_MS 20U
-
-/*******************************************************************************/
-/*                                 PRIVATE TYPES                               */
-/*******************************************************************************/
-
-/** @brief Steps of a source switch. */
-typedef enum
-{
-    SWITCH_IDLE = 0, /**< Source settled, amplifier on. */
-    SWITCH_MUTED,    /**< Amplifier off, SEL about to change. */
-    SWITCH_SETTLING  /**< SEL changed, amplifier about to come back. */
-} switch_step_t;
-
 /*******************************************************************************/
 /*                              PRIVATE VARIABLES                              */
 /*******************************************************************************/
@@ -58,8 +40,6 @@ typedef enum
 static xl_mode_t mode = XL_MODE_AUTO;
 static xl_source_t source = XL_SOURCE_WBA;
 static xl_source_t target = XL_SOURCE_WBA;
-static switch_step_t step = SWITCH_IDLE;
-static uint32_t step_at;
 static int music;
 static int music_raw;
 static uint32_t music_raw_since;
@@ -68,19 +48,6 @@ static int initialized;
 /*******************************************************************************/
 /*                              PRIVATE FUNCTIONS                              */
 /*******************************************************************************/
-
-/** @brief Drive SEL for @p to. */
-static void set_sel(xl_source_t to)
-{
-    HAL_GPIO_WritePin(XL_SEL_PORT, XL_SEL_PIN, (to == XL_SOURCE_N6) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-}
-
-/** @brief Shut the amplifier down (pull SD low) or release it. */
-static void set_amp_on(int on)
-{
-    /* Open drain: "set" releases the line, the module's bias takes over. */
-    HAL_GPIO_WritePin(XL_AMP_SD_PORT, XL_AMP_SD_PIN, on ? GPIO_PIN_SET : GPIO_PIN_RESET);
-}
 
 /** @brief Source the rules want now. */
 static xl_source_t wanted(void)
@@ -121,6 +88,11 @@ static int read_music(uint32_t now_ms)
     return 0;
 }
 
+static xl_source_t source_of(xl_audio_source_t audio)
+{
+    return (audio == XL_AUDIO_SPEECH) ? XL_SOURCE_N6 : XL_SOURCE_WBA;
+}
+
 /*******************************************************************************/
 /*                               PUBLIC FUNCTIONS                              */
 /*******************************************************************************/
@@ -130,33 +102,33 @@ void xl_router_init(void)
     GPIO_InitTypeDef gpio = {0};
 
     __HAL_RCC_GPIOD_CLK_ENABLE();
-    __HAL_RCC_GPIOH_CLK_ENABLE();
 
-    /* Start where the hardware already is: WBA selected, amplifier on. */
-    set_sel(XL_SOURCE_WBA);
-    gpio.Pin = XL_SEL_PIN;
+    /* The TMUX stays open (EN high) until the receive pins are set up. */
+    HAL_GPIO_WritePin(XL_TMUX_EN_PORT, XL_TMUX_EN_PIN, GPIO_PIN_SET);
+    gpio.Pin = XL_TMUX_EN_PIN;
     gpio.Mode = GPIO_MODE_OUTPUT_PP;
     gpio.Pull = GPIO_NOPULL;
     gpio.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(XL_SEL_PORT, &gpio);
-
-    set_amp_on(1);
-    gpio.Pin = XL_AMP_SD_PIN;
-    gpio.Mode = GPIO_MODE_OUTPUT_OD;
-    HAL_GPIO_Init(XL_AMP_SD_PORT, &gpio);
+    HAL_GPIO_Init(XL_TMUX_EN_PORT, &gpio);
 
     gpio.Pin = XL_MUSIC_PIN;
     gpio.Mode = GPIO_MODE_INPUT;
-    gpio.Pull = GPIO_PULLDOWN; /* no WBA connected or powered: no music */
+    gpio.Pull = GPIO_PULLDOWN; /* no WBA connected or powered, or the TMUX open: no music */
     HAL_GPIO_Init(XL_MUSIC_PORT, &gpio);
 
     source = XL_SOURCE_WBA;
     target = XL_SOURCE_WBA;
-    step = SWITCH_IDLE;
+    xl_audio_out_select(XL_AUDIO_MUSIC);
     music = 0;
     music_raw = 0;
     music_raw_since = 0U;
     initialized = 1;
+}
+
+void xl_router_connect_wba(int connect)
+{
+    HAL_GPIO_WritePin(XL_TMUX_EN_PORT, XL_TMUX_EN_PIN, connect ? GPIO_PIN_RESET : GPIO_PIN_SET);
+    LOG_INFO("Router: TMUX1574 %s (D7 %s)", connect ? "closed, WBA connected" : "open", connect ? "low" : "high");
 }
 
 void xl_router_set_mode(xl_mode_t new_mode)
@@ -193,42 +165,25 @@ xl_source_t xl_router_target(void)
 int xl_router_poll(uint32_t now_ms)
 {
     int changed;
+    xl_source_t now_playing;
 
     if (!initialized)
     {
         return 0;
     }
     changed = read_music(now_ms);
-    switch (step)
+    xl_audio_out_poll(now_ms);
+    if (wanted() != target)
     {
-    case SWITCH_IDLE:
         target = wanted();
-        if (target != source)
-        {
-            set_amp_on(0);
-            step = SWITCH_MUTED;
-            step_at = now_ms;
-        }
-        break;
-    case SWITCH_MUTED:
-        if ((now_ms - step_at) >= XL_SWITCH_MUTE_MS)
-        {
-            set_sel(target);
-            source = target;
-            step = SWITCH_SETTLING;
-            step_at = now_ms;
-            changed = 1;
-            LOG_INFO("Router: speaker now plays the %s", (source == XL_SOURCE_N6) ? "N6 translator" : "WBA music");
-        }
-        break;
-    case SWITCH_SETTLING:
-    default:
-        if ((now_ms - step_at) >= XL_SWITCH_MUTE_MS)
-        {
-            set_amp_on(1);
-            step = SWITCH_IDLE;
-        }
-        break;
+        xl_audio_out_select((target == XL_SOURCE_N6) ? XL_AUDIO_SPEECH : XL_AUDIO_MUSIC);
+    }
+    now_playing = source_of(xl_audio_out_selected());
+    if (now_playing != source)
+    {
+        source = now_playing;
+        changed = 1;
+        LOG_INFO("Router: the speaker plays the %s", (source == XL_SOURCE_N6) ? "N6 translator" : "WBA music");
     }
     return changed;
 }

@@ -629,8 +629,7 @@ static void enter_music(uint32_t now)
     xl_sentence_reset();
     if (audio_ok)
     {
-        xl_audio_out_flush();
-        xl_audio_out_stop();
+        xl_audio_out_flush(); /* the stream keeps running: the music goes out through the DK's jack */
     }
     state = STATE_MUSIC_SCREEN;
     screen_until = now + XL_MUSIC_SCREEN_MS;
@@ -663,10 +662,6 @@ static void wake_translator(void)
         lcd_power(1);
     }
     xl_translator_listen(XL_LISTEN_MUSIC, 0);
-    if (audio_ok && (xl_audio_out_start() != 0))
-    {
-        LOG_ERROR("Translator: speaker stream did not restart");
-    }
     state = STATE_TRANSLATING;
     chime_pending = 1;
     ++revision;
@@ -689,7 +684,8 @@ static void start_speaker(void)
     }
     audio_ok = 1;
     chime_pending = 1;
-    LOG_INFO("Translator: speaker output on SAI2 (A2/D6/D8), switch on D7, amp SD on D4, music in on D2");
+    xl_router_connect_wba(1); /* the receive pins are inputs now: let the WBA's signals in */
+    LOG_INFO("Translator: speaker on the 3.5 mm jack (WM8904); WBA music in on A2/D6/D8, music line on D2");
 }
 
 /*******************************************************************************/

@@ -22,3 +22,10 @@ if(APP_EDU_MODE OR APP_TRANSLATOR_MODE)
         ${CMAKE_CURRENT_SOURCE_DIR}/gt911
         ${CMAKE_CURRENT_SOURCE_DIR}/common)
 endif()
+
+# WM8904 audio codec (I2C2, the DK's 3.5 mm jack), from github.com/STMicroelectronics/stm32-wm8904
+# V1.1.1, unmodified. Translator mode only: the Hindi voice and the WBA music go out on the jack.
+if(APP_TRANSLATOR_MODE)
+    add_library(wm8904 wm8904/wm8904.c wm8904/wm8904_reg.c)
+    target_include_directories(wm8904 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/wm8904)
+endif()

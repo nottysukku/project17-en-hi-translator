@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
-# Translator mode (-DAPP_TRANSLATOR_MODE=ON): English speech in, Hindi out on a MAX98357A
-# speaker that the N6 shares with a STM32WBA55 Bluetooth music receiver through a TMUX1574.
-#   xl_audio_out.c   SAI2 block B I2S master (A2/D6/D8) fed from a sample ring by GPDMA1 ch. 7
-#   xl_router.c      which board has the speaker: TMUX SEL (D7), amp shutdown (D4), music in (D2)
+# Translator mode (-DAPP_TRANSLATOR_MODE=ON): English speech in, Hindi out of the DK's 3.5 mm jack
+# (WM8904 -> PAM8403 -> 4 Ohm 3 W speaker), which also plays the music of a STM32WBA55 Bluetooth
+# receiver: its I2S comes in through a TMUX1574.
+#   xl_audio_out.c   SAI1 block A I2S master + WM8904 (the jack), GPDMA1 ch. 7; music in on SAI2
+#                    block B I2S slave (A2/D6/D8), GPDMA1 ch. 5, rate-matched to the jack
+#   xl_router.c      which source the jack plays; TMUX EN (D7), music line (D2)
 #   xl_display.c     the screen, the touch buttons and the power states; runs on the display thread
 #   xl_sentence.c    cuts the recognized English into sentences (end marks, pauses)
 #   xl_translator.c  the translator thread: translation (src/translate) and speech, in turn
@@ -24,5 +26,5 @@ target_include_directories(app_translator PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(app_translator PUBLIC mw_lcd threadx)
 target_link_libraries(app_translator PRIVATE
     app_config app_audio app_text_case asr_engine boards bsp bsp_touch logger mcu_clock stm32n6_hal
-    it2 tts stedgeai)
+    it2 tts stedgeai wm8904)
 target_compile_options(app_translator PRIVATE -Wextra)

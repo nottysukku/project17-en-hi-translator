@@ -89,6 +89,9 @@ path = [
     # gt911_conf_template.h) and Components/Common/ts.h.
     "src/hardware/components/gt911/**",
     "src/hardware/components/common/**",
+    # Translator mode audio: the WM8904 codec component V1.1.1
+    # (github.com/STMicroelectronics/stm32-wm8904, its LICENSE.md as LICENSE.txt).
+    "src/hardware/components/wm8904/**",
 ]
 precedence = "override"
 SPDX-FileCopyrightText = "STMicroelectronics"
