@@ -3,11 +3,13 @@
     python smoke_test.py <work_dir> <parquet with "audio" and "sentence" columns>
 
 The stand-in has CynipsNet's layers (from the compile report) and random weights; it is saved
-as a QDQ ONNX file like the board's cynipsnet_punct1.onnx, once with the input as [1, 64, 600]
-and once as [1, 600, 64] plus a Transpose. Then, as the notebook does: load it into PyTorch,
-check it computes what ONNX Runtime computes, train a few steps (the loss must fall), write the
-float ONNX back (must match PyTorch), quantize to int8 with the board's input scale, decode with
-the board simulation, and write network_shape.h.
+as an int8 QDQ ONNX file like the board's cynipsnet_punct1.onnx: input [1, 64, 1, 600] with 2-D
+convolutions, as the owner's file is, and the ReLUs folded into the int8 steps (no Relu node in
+the file, zero point -128), as ST's report of it shows. Two more layouts: [1, 64, 600], and
+[1, 600, 64] plus a Transpose. Then, as the notebook does: load it into PyTorch (all 33 ReLUs
+found, same output as ONNX Runtime on the float model), train a few steps (the loss must fall),
+write the float ONNX back (must match PyTorch), quantize to int8 with the board's input scale,
+decode with the board simulation, write network_shape.h, and run the training loop.
 """
 import os
 import sys
@@ -29,21 +31,61 @@ class ChannelsLast(torch.nn.Module):
         return self.net(x.transpose(1, 2)).transpose(1, 2)
 
 
-def make_standin(work, windows, channels_last):
+class Sep2d(torch.nn.Module):
+    def __init__(self, cin, cout, k, stride=1):
+        super().__init__()
+        self.dw = torch.nn.Conv2d(cin, cin, (1, k), (1, stride), (0, k // 2), groups=cin)
+        self.pw = torch.nn.Conv2d(cin, cout, 1)
+
+    def forward(self, x):
+        return self.pw(self.dw(x))
+
+
+class CynipsLike2d(torch.nn.Module):
+    """CynipsNet's layers as 2-D convolutions: input [1, 64, 1, 600], output [1, 32, 1, 300]."""
+
+    def __init__(self):
+        super().__init__()
+        F = torch.nn.functional
+        self.relu = F.relu
+        self.c1 = Sep2d(A.BANDS, 256, 33, 2)
+        self.blocks = torch.nn.ModuleList()
+        for cin, cout, k in A.CynipsLike.BLOCKS:
+            subs = torch.nn.ModuleList([Sep2d(cin if i == 0 else cout, cout, k) for i in range(5)])
+            self.blocks.append(torch.nn.ModuleDict({"subs": subs, "res": torch.nn.Conv2d(cin, cout, 1)}))
+        self.c2 = Sep2d(512, 512, 173)
+        self.c3 = torch.nn.Conv2d(512, 1024, 1)
+        self.c4 = torch.nn.Conv2d(1024, len(A.TOKENS), 1)
+
+    def forward(self, x):
+        x = self.relu(self.c1(x))
+        for b in self.blocks:
+            y = x
+            for i, s in enumerate(b["subs"]):
+                y = s(y)
+                if i < 4:
+                    y = self.relu(y)
+            x = self.relu(y + b["res"](x))
+        return self.c4(self.relu(self.c3(self.relu(self.c2(x)))))
+
+
+LAYOUTS = {"4d": (1, A.BANDS, 1, A.WIN_FRAMES), "cf": (1, A.BANDS, A.WIN_FRAMES), "cl": (1, A.WIN_FRAMES, A.BANDS)}
+
+
+def make_standin(work, windows, layout):
     torch.manual_seed(0)
-    net = A.CynipsLike().eval()
+    net = (CynipsLike2d() if layout == "4d" else A.CynipsLike()).eval()
     with torch.no_grad():
         for m in net.modules():
-            if isinstance(m, torch.nn.Conv1d):
+            if isinstance(m, (torch.nn.Conv1d, torch.nn.Conv2d)):
                 m.weight.mul_(0.5)
     print("stand-in parameters: %d (the compile report says 7.2 M)" % A.count_params(net))
-    model = ChannelsLast(net) if channels_last else net
-    shape = (1, A.WIN_FRAMES, A.BANDS) if channels_last else (1, A.BANDS, A.WIN_FRAMES)
-    fp = os.path.join(work, "standin_%s_float.onnx" % ("cl" if channels_last else "cf"))
+    model = ChannelsLast(net) if layout == "cl" else net
+    fp = os.path.join(work, "standin_%s_float.onnx" % layout)
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        torch.onnx.export(model, torch.zeros(shape), fp, input_names=["x"], output_names=["logits"],
+        torch.onnx.export(model, torch.zeros(LAYOUTS[layout]), fp, input_names=["x"], output_names=["logits"],
                           opset_version=17, dynamo=False)
     qdq = fp.replace("_float", "_qdq")
     A.quantize_int8(fp, qdq, windows)
@@ -62,12 +104,16 @@ def main():
     windows = A.calibration_windows(dev, 40)
     print("calibration windows:", len(windows))
 
-    for channels_last in (False, True):
+    for layout in LAYOUTS:
         t0 = time.time()
-        fp, qdq = make_standin(work, windows, channels_last)
+        fp, qdq = make_standin(work, windows, layout)
         net = A.OnnxNet(qdq)
-        print("layout %s: input %s output %s, %d parameters" % ("[1,600,64]" if channels_last else "[1,64,600]",
-                                                                 net.in_dims, net.out_dims, A.count_params(net)))
+        import onnx
+        file_ops = {n.op_type for n in onnx.load(qdq).graph.node}
+        relus = sum(1 for op in net.ops if op[0] == "Relu")
+        print("layout %s: input %s output %s, %d parameters, %d ReLUs found (Relu nodes in the file: %s)"
+              % (layout, net.in_dims, net.out_dims, A.count_params(net), relus, "Relu" in file_ops))
+        assert relus == 33
         # 1. PyTorch from the QDQ file vs ONNX Runtime on the float file (differ by weight rounding only)
         import onnxruntime as ort
         name, in_dims, out_dims = A.graph_layout(fp)
@@ -76,9 +122,9 @@ def main():
         with torch.no_grad():
             got = net(torch.from_numpy(w.astype(np.float32) * A.INPUT_SCALE)[None])[0].numpy()
         cos = float((ref * got).sum() / np.linalg.norm(ref) / np.linalg.norm(got))
-        print("  PyTorch (QDQ weights) vs ONNX Runtime (float): cosine %.4f, argmax agree %.1f%%"
-              % (cos, 100 * float((ref.argmax(-1) == got.argmax(-1)).mean())))
-        assert cos > 0.98
+        agree = float((ref.argmax(-1) == got.argmax(-1)).mean())
+        print("  PyTorch (QDQ weights) vs ONNX Runtime (float): cosine %.4f, argmax agree %.1f%%" % (cos, 100 * agree))
+        assert cos > 0.98 and agree > 0.9
 
         # 2. a few training steps on one small batch: the loss must fall
         cfg = A.TrainConfig(lr=1e-3, warmup_steps=1, epochs=1, batch_seconds=40, kl_weight=0.5, amp=False,
@@ -128,7 +174,7 @@ def main():
         A.write_network_shape(os.path.join(work, "network_shape.h"), "cynipsnet_inen1", in_s, out_s)
 
         # 7. the real loop for half a minute: two loader workers, logging, evaluation, stop and save
-        if not channels_last:
+        if layout == "4d":
             cfg = A.TrainConfig(lr=3e-4, warmup_steps=2, epochs=1, batch_seconds=40, max_batch=8, amp=False,
                                 eval_every=6, log_every=2, session_hours=40 / 3600, workers=2)
             tr = A.Trainer(qdq, os.path.join(work, "ck_fit"), cfg, torch.device("cpu"))

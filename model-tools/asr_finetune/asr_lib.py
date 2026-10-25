@@ -117,11 +117,13 @@ def logmel_numpy(pcm16):
     return x[0, : int(n[0])].numpy()
 
 
-def normalize_utterance(logmel, n_frames, jitter=0.0):
+def normalize_utterance(logmel, n_frames, jitter=0.0, mix=0.0):
     """Per-band mean/deviation over each utterance's own frames, then the board's int8 grid.
 
-    The board uses the last 30 s of whatever it heard; per utterance is the training stand-in, with
-    an optional random error on the statistics (jitter) so the model does not depend on them.
+    The board uses the last 30 s of whatever it heard, several utterances and the room between
+    them; per utterance is the training stand-in. With probability @p mix an utterance's statistics
+    are blended (a random share) with those of the whole batch, i.e. of other speakers and rooms,
+    and @p jitter adds a random error to them, so the model does not depend on them.
     Returns features [B, T, 64] with padded frames at 0, and the frame mask [B, T, 1].
     """
     B, T, _ = logmel.shape
@@ -129,6 +131,15 @@ def normalize_utterance(logmel, n_frames, jitter=0.0):
     count = mask.sum(1, keepdim=True).clamp(min=1.0)
     mean = (logmel * mask).sum(1, keepdim=True) / count
     var = ((logmel - mean).square() * mask).sum(1, keepdim=True) / count
+    if mix > 0 and B > 1:
+        total = mask.sum().clamp(min=1.0)
+        b_mean = (logmel * mask).sum((0, 1), keepdim=True) / total
+        b_var = ((logmel - b_mean).square() * mask).sum((0, 1), keepdim=True) / total
+        share = (torch.rand(B, 1, 1, device=logmel.device) < mix).float() * torch.rand(B, 1, 1, device=logmel.device)
+        # mixture of the two populations: its variance includes the spread between the means
+        m = (1 - share) * mean + share * b_mean
+        var = (1 - share) * (var + (mean - m).square()) + share * (b_var + (b_mean - m).square())
+        mean = m
     std = var.clamp(min=0).sqrt().clamp(min=SIGMA_FLOOR)
     if jitter > 0:
         mean = mean + jitter * std * torch.randn_like(mean)
@@ -257,8 +268,9 @@ class OnnxNet(nn.Module):
         for n in g.node:
             if n.op_type == "Constant":
                 consts[n.output[0]] = numpy_helper.to_array(_attrs(n)["value"])
-        alias, nodes = {}, []
+        alias, nodes, quantizers = {}, [], {}
         self.weight_dq = {}  # float weight name -> (int8 name, scale name, zp name) in the file
+        self.qdq_relu = set()  # DequantizeLinear outputs that stand for a ReLU
         for n in g.node:
             if n.op_type == "Constant":
                 continue
@@ -274,8 +286,23 @@ class OnnxNet(nn.Module):
                 consts[n.output[0]] = ((q - zp) * s).astype(np.float32)
                 self.weight_dq[n.output[0]] = list(n.input)
                 continue
-            if n.op_type in ("QuantizeLinear", "DequantizeLinear"):
+            if n.op_type == "QuantizeLinear":
+                quantizers[n.output[0]] = n
                 alias[n.output[0]] = n.input[0]
+                continue
+            if n.op_type == "DequantizeLinear":
+                # An activation's int8 step. When its range starts at 0 (zero point = the lowest
+                # code), it is a ReLU: the file has no Relu nodes, the step cuts negatives off.
+                q = quantizers.get(n.input[0])
+                zp = consts.get(n.input[2]) if len(n.input) > 2 and n.input[2] else None
+                lowest = (np.iinfo(zp.dtype).min if zp is not None else 0)  # no zero point: uint8
+                if (q is not None) and np.all((np.zeros(1) if zp is None else np.asarray(zp)).astype(np.int64)
+                                              == lowest):
+                    relu = onnx.helper.make_node("Relu", [q.input[0]], [n.output[0]], name=n.output[0] + "_relu")
+                    self.qdq_relu.add(n.output[0])
+                    nodes.append(relu)
+                else:
+                    alias[n.output[0]] = n.input[0]
                 continue
             if n.op_type not in self.SUPPORTED:
                 raise ValueError("operator %s (%s) is not supported here" % (n.op_type, n.name))
@@ -446,6 +473,10 @@ class OnnxNet(nn.Module):
         g = model.graph
         keep = []
         for n in g.node:
+            if n.op_type == "DequantizeLinear" and n.output[0] in self.qdq_relu:
+                source = self.alias.get(n.input[0], n.input[0])
+                keep.append(helper.make_node("Relu", [source], [n.output[0]], name=n.output[0] + "_relu"))
+                continue
             if n.op_type in ("QuantizeLinear", "DequantizeLinear"):
                 continue
             if n.op_type == "Constant":
@@ -891,6 +922,7 @@ class TrainConfig:
     max_batch: int = 64
     kl_weight: float = 0.5          # keep the old behaviour on replay (LibriSpeech) samples
     norm_jitter: float = 0.1
+    norm_mix: float = 0.5           # share of rows normalized partly with other rows' statistics
     spec_augment: bool = True
     grad_clip: float = 1.0
     amp: bool = True
@@ -916,6 +948,7 @@ class Trainer:
         self.opt = torch.optim.AdamW(self.model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
         self.scaler = torch.amp.GradScaler("cuda", enabled=cfg.amp and device.type == "cuda")
         self.step, self.epoch, self.best = 0, 0, float("inf")
+        self.nonfinite = 0
         self.total_steps = 1
         self.audio_hours = 0.0
         self.history = []
@@ -934,6 +967,9 @@ class Trainer:
         if not os.path.exists(path):
             return False
         ck = torch.load(path, map_location=self.device, weights_only=False)
+        if not all(bool(torch.isfinite(v).all()) for v in ck["model"].values() if torch.is_tensor(v)):
+            print("%s holds weights that are not numbers: not resumed, starting again" % path)
+            return False
         self.model.load_state_dict(ck["model"])
         self.opt.load_state_dict(ck["opt"])
         self.scaler.load_state_dict(ck["scaler"])
@@ -951,7 +987,8 @@ class Trainer:
 
     def features(self, wave, lengths, train):
         logmel, frames = self.logmel(wave.to(self.device).float() / 32768.0, lengths.to(self.device))
-        x, mask = normalize_utterance(logmel, frames, self.cfg.norm_jitter if train else 0.0)
+        x, mask = normalize_utterance(logmel, frames, self.cfg.norm_jitter if train else 0.0,
+                                      self.cfg.norm_mix if train else 0.0)
         if train and self.cfg.spec_augment:
             x = spec_augment(x, mask)
         return x, frames
@@ -981,6 +1018,14 @@ class Trainer:
             m = (torch.arange(logits.shape[1], device=dev)[None, :] < out_len[sel][:, None]).float()
             kl = ((t.exp() * (t - s)).sum(-1) * m).sum() / m.sum().clamp(min=1)
             loss = loss + self.cfg.kl_weight * kl
+        if not bool(torch.isfinite(loss)):
+            # nothing to learn from this batch (an overflow): skip it, and give up if it keeps happening
+            self.nonfinite += 1
+            if self.nonfinite >= 50:
+                raise RuntimeError("50 batches in a row gave a loss that is not a number: training stopped. "
+                                   "Send the output of cells 4 and 8.")
+            return float("nan"), float("nan")
+        self.nonfinite = 0
         for g in self.opt.param_groups:
             g["lr"] = self.lr_at(self.step)
         self.opt.zero_grad(set_to_none=True)
@@ -1008,9 +1053,7 @@ class Trainer:
             idx = order[i:j]
             wave, lengths, _, _, _, _ = collate([(pcms[k], [1], False, False) for k in idx])
             x, frames = self.features(wave, lengths, False)
-            with torch.autocast(self.device.type, dtype=torch.float16,
-                                enabled=self.cfg.amp and self.device.type == "cuda"):
-                logits = model(x).float()
+            logits = model(x).float()  # full precision: the check must not depend on fp16 ranges
             stride = model.time_stride()
             for n, k in enumerate(idx):
                 steps = int((frames[n] + stride - 1) // stride)
@@ -1048,6 +1091,8 @@ class Trainer:
             t_log, h_log, sums = time.time(), self.audio_hours, [0.0, 0.0, 0]
             for batch in loader:
                 ctc, kl = self.train_step(batch)
+                if math.isnan(ctc):
+                    continue
                 sums[0] += ctc
                 sums[1] += kl
                 sums[2] += 1
@@ -1149,7 +1194,7 @@ def quantize_int8(float_path, qdq_path, windows, method="minmax"):
     quantize_static(float_path, qdq_path, Reader(), quant_format=QuantFormat.QDQ, per_channel=True,
                     activation_type=QuantType.QInt8, weight_type=QuantType.QInt8,
                     calibrate_method=CalibrationMethod.Percentile if method == "percentile" else CalibrationMethod.MinMax,
-                    extra_options={"ActivationSymmetric": True, "WeightSymmetric": True})
+                    extra_options={"ActivationSymmetric": False, "WeightSymmetric": True})
     return finish_qdq(qdq_path, windows)
 
 
@@ -1159,9 +1204,10 @@ def finish_qdq(qdq_path, windows):
     - Input: a QuantizeLinear/DequantizeLinear pair right on the graph input with the board's
       scale and zero point (norm.c writes codes with them). Inserted if the quantizer put the
       first pair after a layout operator.
-    - Output: a pair on the graph output (the board reads int8 logits; ST Edge AI needs the scale
-      for --output-data-type int8). onnxruntime leaves the output in float, so it is added here
-      with the largest output over the calibration windows mapped to 127.
+    - Output: a pair on the graph output with zero point 0 (the board reads int8 logits; ST Edge
+      AI needs the scale for --output-data-type int8). Added when onnxruntime left the output in
+      float (the largest output over the calibration windows maps to 127), made symmetric when it
+      quantized it with another zero point.
     """
     import onnx
     import onnxruntime as ort
@@ -1191,8 +1237,17 @@ def finish_qdq(qdq_path, windows):
 
     out = g.output[0].name
     dq = [n for n in g.node if n.op_type == "DequantizeLinear" and n.output[0] == out]
+    inits = {t.name: t for t in g.initializer}
     if dq:
-        out_scale = float(numpy_helper.to_array({t.name: t for t in g.initializer}[dq[0].input[1]]))
+        # the board reads the logits with zero point 0 (network_shape.h): make the pair symmetric
+        scale = float(numpy_helper.to_array(inits[dq[0].input[1]]))
+        zp = int(numpy_helper.to_array(inits[dq[0].input[2]])) if len(dq[0].input) > 2 else 0
+        out_scale = max(abs(-128 - zp), abs(127 - zp)) * scale / 127.0
+        for n in g.node:
+            if n.op_type in ("QuantizeLinear", "DequantizeLinear") and n.input[1] == dq[0].input[1]:
+                inits[n.input[1]].CopyFrom(numpy_helper.from_array(np.array(out_scale, np.float32), n.input[1]))
+                if len(n.input) > 2:
+                    inits[n.input[2]].CopyFrom(numpy_helper.from_array(np.array(0, np.int8), n.input[2]))
     else:
         onnx.save(m, qdq_path)
         sess = ort.InferenceSession(qdq_path, providers=["CPUExecutionProvider"])
@@ -1225,20 +1280,34 @@ class BoardSim:
         self.left = LEFT_FRAMES // (WIN_FRAMES // WIN_STEPS)
         self.core = STRIDE_FRAMES // (WIN_FRAMES // WIN_STEPS)
 
-    def transcribe(self, pcm, lead_s=1.0, tail_s=2.5):
-        rng = np.random.default_rng(0)
-        noise = lambda n: np.round(rng.standard_normal(n) * 3).astype(np.int16)  # a quiet room
-        x = np.concatenate([noise(int(lead_s * SR)), pcm, noise(int(tail_s * SR))])
+    def run_windows(self, windows):
+        """int8 windows [600, 64], one per 50 frames as norm.c writes them -> text, as net_ctc.c
+        commits it: the first window from its start, every later one only its core."""
         ids = []
-        for k, (_, w) in enumerate(board_windows(logmel_numpy(x))):
+        for k, w in enumerate(windows):
             y = self.sess.run(None, {self.name: window_to_input(w, self.in_dims)})[0]
             steps = output_to_steps(y, self.out_dims).argmax(-1)
             first = 0 if k == 0 else self.left
             ids += steps[first: self.left + self.core].tolist()
         return greedy_text(ids)
 
-    def evaluate(self, items):
-        return wer([t for _, t in items], [self.transcribe(p) for p, _ in items])
+    def transcribe(self, pcm, lead_s=1.0, tail_s=2.5, noise_std=30.0):
+        """One stream: room noise (about -60 dBFS), the audio, room noise; the tail lets the
+        decoder commit the last words (they are committed 1.3 s after they are heard)."""
+        rng = np.random.default_rng(0)
+        noise = lambda n: np.round(rng.standard_normal(n) * noise_std).astype(np.int16)
+        x = np.concatenate([noise(int(lead_s * SR)), pcm, noise(int(tail_s * SR))])
+        return self.run_windows(w for _, w in board_windows(logmel_numpy(x)))
+
+    def evaluate(self, items, gap_s=0.6, noise_std=30.0):
+        """The utterances back to back as one conversation, as the board hears speech: its
+        statistics then come from the last 30 s of speech and room, not from a cold start."""
+        rng = np.random.default_rng(1)
+        parts = []
+        for pcm, _ in items:
+            parts += [pcm, np.round(rng.standard_normal(int(gap_s * SR)) * noise_std).astype(np.int16)]
+        hyp = self.transcribe(np.concatenate(parts), noise_std=noise_std)
+        return wer([" ".join(t for _, t in items)], [hyp])
 
 
 NETWORK_SHAPE_H = """/**

@@ -16,6 +16,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 INTRO = r"""
 # Project 17: teach the DK's speech recognizer Indian-accented English
 
+**Version 2 (2026-10-25).** Version 1 lost the model's ReLUs when it read the file (they are inside
+its int8 steps), so the old model scored 100% and the losses were `nan`. If you ran version 1: open
+this one and Run all. It trains into new folders on Drive (`checkpoints_v2`), and reuses the
+downloaded index and check sets. Cell 8 now stops before training if the old model does not score
+sensibly.
+
 This notebook fine-tunes the recognizer that runs on the STM32N6570-DK (CynipsNet, the model in
 `firmware-n6/src/asr_engine/models/cynipsnet_punct1`) on English spoken with Indian accents, then
 gives back a file for ST Edge AI. The new model has **exactly the same layers and size** (7.2 M
@@ -119,7 +125,7 @@ DEV_SOURCES = {
 SVARAH = A.Source("svarah", "ai4bharat/Svarah", ["data/test-*.parquet"], "text", punct=False,
                   audio_col="audio_filepath", gated=True)
 DEV_N = 6 if QUICK else 400     # utterances per check set
-BOARD_N = 3 if QUICK else 60    # utterances per set for the board simulation at the end (slow: CPU)
+BOARD_N = 3 if QUICK else 40    # utterances per set for the board simulation at the end (slow: CPU)
 
 CFG = A.TrainConfig(
     lr=2e-4,              # peak learning rate (fine-tuning: low)
@@ -140,7 +146,9 @@ CHECK_MODEL = r"""
 # 4. The starting model: the one the board runs now
 assert os.path.exists(START_ONNX), "Upload cynipsnet_punct1.onnx to " + DRIVE + " first (see the top)."
 net = A.OnnxNet(START_ONNX)
+relus = sum(1 for op in net.ops if op[0] == "Relu")
 print("input", net.in_dims, "output", net.out_dims, "parameters %d" % A.count_params(net))
+print("ReLUs: %d (%d of them inside int8 steps); CynipsNet has 33" % (relus, len(net.qdq_relu)))
 assert net.out_dims[net.out_class] == len(A.TOKENS), "not the 32-class punctuation model"
 del net
 """
@@ -194,15 +202,32 @@ for k, v in DEV_SETS.items():
 
 BASELINE = r"""
 # 8. The old model on the check sets (once), then resume if a checkpoint exists
-CK = DRIVE + ("/checkpoints_quick" if QUICK else "/checkpoints")
+# (v2: the first version lost the model's ReLUs; its checkpoints and baseline are not used)
+CK = DRIVE + ("/checkpoints_quick" if QUICK else "/checkpoints_v2")
 trainer = A.Trainer(START_ONNX, CK, CFG, DEVICE)
-base_path = DRIVE + ("/baseline_quick.json" if QUICK else "/baseline.json")
+base_path = DRIVE + ("/baseline_quick.json" if QUICK else "/baseline_v2.json")
 if os.path.exists(base_path):
     BASE = json.load(open(base_path))
 else:
     BASE = trainer.evaluate(DEV_SETS)
     json.dump(BASE, open(base_path, "w"))
 print("old model:", "  ".join("%s WER %.2f%%" % (k, 100 * v["wer"]) for k, v in BASE.items()))
+for pcm, ref in DEV_SETS["libri_dev_clean"][:3]:
+    print("  said: ", ref)
+    print("  heard:", trainer.transcribe([pcm])[0])
+if not QUICK and BASE["libri_dev_clean"]["wer"] > 0.30:
+    raise RuntimeError("The old model should score about 7%% on LibriSpeech dev-clean, not %.0f%%: the model "
+                       "file was not read correctly. Do not train; send the output of cells 4 and 8."
+                       % (100 * BASE["libri_dev_clean"]["wer"]))
+# the same model as the board runs it: int8, 6 s windows, statistics of the last 30 s (CPU, a few minutes)
+board_path = DRIVE + ("/baseline_board_quick.json" if QUICK else "/baseline_board_v2.json")
+if not os.path.exists(board_path):
+    n = 3 if QUICK else 25
+    json.dump({"wer": A.BoardSim(START_ONNX).evaluate(DEV_SETS["libri_dev_clean"][:n])["wer"], "n": n},
+              open(board_path, "w"))
+BOARD0 = json.load(open(board_path))
+print("old model as the board runs it, LibriSpeech dev-clean (%d sentences in a row): WER %.2f%%"
+      % (BOARD0["n"], 100 * BOARD0["wer"]))
 if trainer.load("last.pt"):
     print("resuming: epoch %d, step %d, %.0f h of audio so far" % (trainer.epoch, trainer.step, trainer.audio_hours))
 """
@@ -211,7 +236,7 @@ TRAIN = r"""
 # 9. Train. Stops by itself before the session limit; run the notebook again to continue.
 def log(msg):
     print(msg, flush=True)
-    with open(DRIVE + ("/train_log_quick.txt" if QUICK else "/train_log.txt"), "a") as f:
+    with open(DRIVE + ("/train_log_quick.txt" if QUICK else "/train_log_v2.txt"), "a") as f:
         f.write(time.strftime("%Y-%m-%d %H:%M ") + msg + "\n")
 
 trainer.fit(UNITS, SOURCES, DEV_SETS, log)

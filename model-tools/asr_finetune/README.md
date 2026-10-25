@@ -28,6 +28,16 @@ placement. The new model drops into the same flash slot (0x71500000, 7.0 MB) and
 - The network is read from the ONNX file the board's model was compiled from (`OnnxNet`), trained,
   and written back into the same graph; the int8 export keeps the board's input scale
   (0.0628561676, zero point 0) and adds an int8 output with its scale in `network_shape.h`.
+- That file (input `[1, 64, 1, 600]`, 2-D convolutions) has no Relu nodes: each ReLU is an int8
+  step whose zero point is the lowest code (-128), so it cuts negatives off. `OnnxNet` turns such
+  steps into ReLUs (CynipsNet has 33) and the float export writes them as Relu nodes; the int8
+  export quantizes activations asymmetrically so they fold back the same way. Version 1 of the
+  notebook skipped these steps: the old model scored 100% and the losses were `nan`.
+- The board simulation (`BoardSim`) feeds each check set as one continuous stream (the board's
+  statistics cover the last 30 s); its window mechanics were checked against whole-utterance
+  decoding with a model whose context fits the window (all steps away from the edges equal).
+  Training blends some rows' statistics with the batch's (`norm_mix`) so the model does not
+  depend on per-sentence normalization.
 
 ## Data (Hugging Face, downloaded by the notebook, about 47 GB)
 
@@ -51,8 +61,8 @@ to -3 dBFS, quiet lead and tail.
   simulation). The notebook writes it to `/content` in its second cell.
 - `make_notebook.py`: builds the notebook from `asr_lib.py` (`--script`: its code cells as one
   script, for a PC test with `ASR_QUICK_TEST=1`).
-- `smoke_test.py`: PC test with a stand-in network of the same layers: load from a QDQ ONNX file in
-  both layouts, train (loss falls), loader, checkpoints, float ONNX back out (1e-6 from PyTorch),
+- `smoke_test.py`: PC test with a stand-in network of the same layers: load from a QDQ ONNX file
+  stored like the owner's (and two other layouts; all 33 ReLUs found), train (loss falls), loader, checkpoints, float ONNX back out (1e-6 from PyTorch),
   int8 with the board's input scale, board simulation, the training loop with two workers.
 - `st_compile_asr.sh`: on the owner's PC, ST Edge AI with the same command as `cynipsnet_punct1`,
   then the files into `firmware-n6/src/asr_engine/models/<name>/` and `models.json`.
