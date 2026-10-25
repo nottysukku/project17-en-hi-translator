@@ -3,3 +3,4 @@ model-tools/downloads/
 *.onnx
 *.npz
 __pycache__/
+model-tools/asr_finetune/notebook_cells.py
