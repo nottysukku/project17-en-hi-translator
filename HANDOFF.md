@@ -136,6 +136,21 @@ have quotes, brackets, "...", "%" or currency, which the recognizer does not wri
   where two float renderings with different noise differ by 0.99 dB. The calibration stays as it is.
 - Speech pipeline with stand-in networks: sample-exact across windows and steps; cancel queues nothing.
 
+**Speech recognition, Indian English (owner's Colab run of notebook v2, 2026-10-26):** 16 epochs, 76.6k steps,
+8,280 h of audio processed at 400-1300x real time on a T4 (about 11 h). Best checkpoint at step 68,000 (`best.pt`,
+exported as `export/cynipsnet_inen1` on the owner's Drive; output scale 0.474794).
+
+| WER | old (`cynipsnet_punct1`) | new (`cynipsnet_inen1`) |
+|---|---|---|
+| Float, whole sentences, 400 each: CV India held-out speakers / NPTEL test / LibriSpeech dev-clean | 38.3 / 54.8 / 6.7 | 24.8 / 32.1 / 7.9 |
+| Board simulation (int8, windows, one stream), 40 each: CV India / NPTEL / LibriSpeech | 44.6 / 51.1 / 4.8 | 36.6 / 29.0 / 5.2 |
+| Board simulation, **Svarah** (300, never trained on, 117 Indian speakers) | **29.9** | **29.3** |
+
+CV and NPTEL check sets share sentences or lecturers with their training sets, so their gains overstate; Svarah is
+the honest measure and barely moved; LibriSpeech (US English) got slightly worse. Next: the board, with the owner's
+voice. If that is not better, options: more accent variety (all 28 IndicTTS files, 13 first languages), a lower
+`kl_weight`, or the owner's own recordings (the capture build, `-DAPP_AUDIO_CAPTURE=ON`, has no PC receiver yet).
+
 **Flash map** (bytes used / slot): voice front end 7.74 / 7.80 MB at 0x70500000; 1.1 MB free (app growth);
 flow ~7.3 / 7.86 MB at 0x70D80000; ASR 7.34 MB at 0x71500000; translation 85.30 / 85.33 MB at 0x71C10000;
 font 2.80 / 2.82 MB at 0x76D70000; vocoder ~15.9 / 16.65 MB at 0x77020000 (to the end).
